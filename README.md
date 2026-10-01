@@ -72,3 +72,9 @@ examples/              lounge and table photos
 ```
 
 Sonar results and limits: [docs/RESULTS.md](docs/RESULTS.md). Sources: [docs/RESEARCH.md](docs/RESEARCH.md).
+
+## Licence
+
+EchoTwin is released under the [GNU AGPL-3.0-or-later](LICENSE). It uses Ultralytics YOLO (AGPL-3.0) and the
+VGGT model, whose original weights are **non-commercial**. See [THIRD_PARTY.md](THIRD_PARTY.md) before you use
+it commercially or run it as a network service.
