@@ -1,0 +1,20 @@
+# local outputs, rebuilt by the pipeline
+data/
+out/
+runs/
+models/
+certs/
+.env
+# environments and caches
+.venv/
+venv/
+*-env/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+# large scan files (comparison images live in docs/)
+*.ply
+*.glb
+*.npz
+*.pt
