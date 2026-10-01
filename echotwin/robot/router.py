@@ -2,12 +2,12 @@
 import re
 from dataclasses import dataclass, field
 
-from .features.tasks import _norm, find_object, find_zone, parse_instruction
+from .features.tasks import _norm
 
 
 @dataclass
 class Intent:
-    kind: str                 # safety | control | task | robot_q | scene_q | other
+    kind: str                 # safety | control | robot_q | scene_q | other
     name: str = ""
     data: dict = field(default_factory=dict)
     text: str = ""
@@ -22,7 +22,6 @@ CONTROL = [
     ("human_turn", r"\b(my turn|i ll take over|let me|take over|i ll do it|i ll show you)\b"),
     ("grip", r"^(grip|grab|close|pick( it)? up)$"),
     ("release", r"^(release|open|let go|drop it)$"),
-    ("new_scene", r"\b(new scene|shuffle|randomi[sz]e|mix (it|them) up|reset the blocks)\b"),
     ("reset", r"^(reset|reset scene|back to the scan|restore)$"),
     ("home", r"\b(go home|home position|go back)\b"),
     ("yes", r"^(yes|yeah|yep|sure|ok|okay|do it)$"),
@@ -44,7 +43,6 @@ WHICH = (r"\b(identify|what is|what s|which is|name)\b.*\b(object|number|thing|i
 SCENE_Q = [
     ("see", r"\bwhat (do|can) you see\b|\bdescribe\b|\blook (at|around)\b|\bwhat s on the table\b"),
     ("where", r"\bwhere (is|s|are)\b"),
-    ("is_in", r"^(is|are) (the )?\w+ (block|cube|one)?\s*(in|on|inside)"),
     ("count", r"\bhow many\b"),
 ]
 
@@ -67,11 +65,5 @@ def route(text: str) -> Intent:
         return Intent("scene_q", "which", {"index": int(k) if k.isdigit() else NUM[k]}, text=text)
     for name, pat in SCENE_Q:
         if re.search(pat, t):
-            return Intent("scene_q", name, {"object": find_object(t), "zone": find_zone(t.split(" in ")[-1]) if " in " in t or " on " in t else None}, text=text)
-    task = parse_instruction(text)
-    if task:
-        return Intent("task", "task", task, text=text)
-    # a bare slot answer ("the red one", "blue tray") -- the sim decides if it is expected
-    if find_object(t) or find_zone(t):
-        return Intent("slot", "slot", text=text)
+            return Intent("scene_q", name, text=text)
     return Intent("other", text=text)

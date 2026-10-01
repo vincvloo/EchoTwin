@@ -5,7 +5,7 @@
 - [x] Core pipeline in simulation (map, sonar, particle filter, benchmark)
 - [x] Real data: photos -> VGGT -> map and objects (lounge, table)
 - [x] Perception web app, bridge to robot twin, robot server with everyday objects
-- [ ] PR1 Merge Sonar and Robot into EchoTwin, remove the blocks demo (this PR)
+- [x] PR1 Merge Sonar and Robot into EchoTwin, remove the blocks demo
 - [ ] PR2 Shared `scene.json`, class catalog for any detected object, bridge fix (surface, real scale, obstacles)
 - [ ] PR3 NVIDIA review of YOLO detections
 - [ ] PR4 Phone scan runs the 3D pipeline, with a "skip, quick mode" button

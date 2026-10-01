@@ -1,6 +1,6 @@
-"""Provider-agnostic AI: intent JSON for unusual phrasing, and a short scene description from a photo.
+"""Provider-agnostic AI: understands unusual phrasing about the objects on the table, names objects from a photo.
 
-Only used when the rules fail (intent) or for 'what do you see?' enrichment. Everything has a template
+Only used when the rules fail or for 'what do you see?' enrichment. Everything has a template
 fallback, so a missing key or a rate limit never blocks the demo.
 Providers: nvidia (build.nvidia.com) and openai share the OpenAI chat-completions format.
 """
@@ -18,15 +18,7 @@ from .. import config
 
 BASE = {"nvidia": "https://integrate.api.nvidia.com/v1", "openai": "https://api.openai.com/v1"}
 
-INTENT_PROMPT = """You turn a spoken instruction for a table-top robot into JSON.
-Objects: red block, blue block, yellow block. Targets: "green" (the green zone), "tray" (the blue tray).
-Reply with JSON only, one of:
-{"action": "place", "object": "red|blue|yellow", "target": "green|tray", "confidence": 0-1}
-{"action": "cleanup"}
-{"clarify": "<short question>"}
-{"action": "none"}   (not a task for the robot)"""
-
-CHAT_PROMPT = (f"You are {config.ROBOT_NAME}, a small friendly robot arm that moves coloured blocks into zones. "
+CHAT_PROMPT = (f"You are {config.ROBOT_NAME}, a small friendly robot arm that moves everyday objects on a table. "
                "Answer in one short spoken sentence, under 15 words. No emojis.")
 
 
@@ -78,17 +70,6 @@ class Brain:
             print("[brain]", model, "error", type(e).__name__, e)
             return None
 
-    async def parse_intent(self, text: str) -> dict | None:
-        out = await self._chat(config.AI_MODEL, [{"role": "system", "content": INTENT_PROMPT},
-                                                 {"role": "user", "content": text}], max_tokens=120, timeout=12.0)
-        if not out:
-            return None
-        m = re.search(r"\{.*\}", out, re.S)
-        try:
-            return json.loads(m.group(0)) if m else None
-        except json.JSONDecodeError:
-            return None
-
     async def parse_everyday(self, text: str, names: list[str]) -> dict | None:
         """Instruction about the real objects on the table -> {object, relation, reference} (1-based numbers)."""
         listing = "\n".join(f"{i}. {n}" for i, n in enumerate(names, 1))
@@ -127,7 +108,7 @@ class Brain:
             img = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
         ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
         b64 = base64.b64encode(buf.tobytes()).decode()
-        prompt = (f"{question} You are a robot looking at a table with coloured blocks and sticky-note zones. "
+        prompt = (f"{question} You are a robot looking at a table with everyday objects on it. "
                   "Answer in at most two short spoken sentences.")
         return await self._chat(config.AI_VISION_MODEL, [{"role": "user", "content": [
             {"type": "text", "text": prompt},

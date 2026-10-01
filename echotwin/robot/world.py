@@ -1,6 +1,6 @@
-"""World: MuJoCo model + object/zone registry, stepping, grasping and goal checks.
+"""World: MuJoCo model + object registry, stepping and grasping.
 
-Grasping is a kinematic attach: closing the gripper around a cube glues it to the hand
+Grasping is a kinematic attach: closing the gripper around an object glues it to the hand
 until release, then physics takes over again. Robust and good enough for trajectory data.
 """
 import copy
@@ -9,8 +9,7 @@ from dataclasses import dataclass, replace
 import mujoco
 import numpy as np
 
-from .scene import (CUBE_HALF, DEFAULT_ZONES, HOME, OBJECT_NAMES, TABLE_HALF, WS_HALF,
-                    ZONE_LABEL, Layout, build_xml)
+from .scene import HOME, TABLE_HALF, WS_HALF, Layout, build_xml
 
 CTRL_HZ = 20
 CTRL_DT = 1.0 / CTRL_HZ
@@ -36,66 +35,34 @@ class World:
 
     # ---------- model ----------
     def build(self, layout: Layout):
-        self.layout = layout.copy()
-        self.model = mujoco.MjModel.from_xml_string(build_xml(self.layout))
+        new_layout = layout.copy()
+        self.model = mujoco.MjModel.from_xml_string(build_xml(new_layout))  # raises before anything changes
+        self.layout = new_layout
         self.data = mujoco.MjData(self.model)
         m = self.model
         self.hand_mocap = m.body_mocapid[m.body("hand").id]
         self.finger_mocap = [m.body_mocapid[m.body(f"finger_{s}").id] for s in "lr"]
-        self.obj_qadr = {n: m.jnt_qposadr[m.joint(f"obj_{n}").id] for n in OBJECT_NAMES}
-        self.obj_dadr = {n: m.jnt_dofadr[m.joint(f"obj_{n}").id] for n in OBJECT_NAMES}
-        for i in range(len(self.layout.props)):  # everyday objects are free bodies too
+        self.obj_qadr, self.obj_dadr = {}, {}
+        for i in range(len(self.layout.props)):  # everyday objects are free bodies
             self.obj_qadr[f"prop_{i}"] = m.jnt_qposadr[m.joint(f"prop_{i}").id]
             self.obj_dadr[f"prop_{i}"] = m.jnt_dofadr[m.joint(f"prop_{i}").id]
-        self.zone_body = {z: m.body(f"zone_{z}").id for z in self.layout.zones}
         self.hand = HandState()
         mujoco.mj_forward(m, self.data)
 
-    def present(self, name: str) -> bool:
-        if name.startswith("prop_"):
-            return True
-        return self.layout.objects[name].get("present", True)
-
     def half(self, name: str) -> float:
         """Half height (grasp height above the table)."""
-        if name.startswith("prop_"):
-            return self.layout.props[int(name[5:])]["size"][2]
-        return self.layout.objects[name]["half"]
+        return self.layout.props[int(name[5:])]["size"][2]
 
     def radius(self, name: str) -> float:
-        if name.startswith("prop_"):
-            hx, hy, _ = self.layout.props[int(name[5:])]["size"]
-            return max(hx, hy)
-        return self.layout.objects[name]["half"]
+        hx, hy, _ = self.layout.props[int(name[5:])]["size"]
+        return max(hx, hy)
 
     def things(self) -> list[str]:
         """Everything the gripper can pick up."""
-        return self.objects() + [f"prop_{i}" for i in range(len(self.layout.props))]
-
-    def objects(self) -> list[str]:
-        return [n for n in OBJECT_NAMES if self.present(n)]
-
-    # ---------- layout ----------
-    def randomise(self, rng: np.random.Generator, keep_zones: bool = True) -> Layout:
-        lay = self.layout.copy()
-        lay.texture = self.layout.texture
-        if not keep_zones:
-            lay.zones = {k: dict(v) for k, v in DEFAULT_ZONES.items()}
-        placed = []
-        for n in OBJECT_NAMES:
-            if not lay.objects[n].get("present", True):
-                continue
-            for _ in range(200):
-                p = np.array([rng.uniform(-0.25, 0.25), rng.uniform(-0.17, 0.03)])
-                if all(np.linalg.norm(p - q) > 0.09 for q in placed) and not any(
-                        self._in_rect(p, z["pos"], z["half"], margin=0.03) for z in lay.zones.values()):
-                    break
-            placed.append(p)
-            lay.objects[n]["pos"] = (float(p[0]), float(p[1]))
-        return lay
+        return [f"prop_{i}" for i in range(len(self.layout.props))]
 
     def reset(self, layout: Layout | None = None):
-        """Rebuild if zones/sizes/texture changed, else just reset state (fast)."""
+        """Rebuild if sizes/texture changed, else just reset state (fast)."""
         layout = layout or self.layout
         self.build(layout)
 
@@ -108,34 +75,6 @@ class World:
         d = d or self.data
         a = self.obj_qadr[name]
         return d.qpos[a:a + 3].copy()
-
-    def zone_pos(self, zone: str) -> np.ndarray:
-        return np.array(self.layout.zones[zone]["pos"], dtype=float)
-
-    @staticmethod
-    def _in_rect(p, c, half, margin=0.0) -> bool:
-        return abs(p[0] - c[0]) <= half[0] + margin and abs(p[1] - c[1]) <= half[1] + margin
-
-    def in_zone(self, name: str, zone: str, d=None, hs: HandState | None = None) -> bool:
-        hs = hs or self.hand
-        if not self.present(name) or hs.attached == name:
-            return False
-        p = self.obj_pos(name, d)
-        z = self.layout.zones[zone]
-        return self._in_rect(p, z["pos"], z["half"]) and p[2] < self.half(name) * 1.6
-
-    def zone_of(self, name: str, d=None, hs=None) -> str | None:
-        for z in self.layout.zones:
-            if self.in_zone(name, z, d, hs):
-                return z
-        return None
-
-    def describe_positions(self) -> dict:
-        out = {}
-        for n in self.objects():
-            p = self.obj_pos(n)
-            out[n] = {"x": round(float(p[0]), 3), "y": round(float(p[1]), 3), "zone": self.zone_of(n)}
-        return out
 
     # ---------- stepping ----------
     def clone(self):
@@ -196,8 +135,5 @@ class World:
         for _ in range(ticks):
             self.step((0, 0, 0, 1 if self.hand.grip else 0))
 
-    def label(self, zone: str) -> str:
-        return ZONE_LABEL.get(zone, zone)
 
-
-__all__ = ["World", "HandState", "CTRL_DT", "CTRL_HZ", "VMAX", "HOME", "CUBE_HALF", "WS_HALF"]
+__all__ = ["World", "HandState", "CTRL_DT", "CTRL_HZ", "VMAX", "HOME", "WS_HALF"]

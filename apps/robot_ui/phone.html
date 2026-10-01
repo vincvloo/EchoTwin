@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -79,7 +79,7 @@ video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:
 
 <section id="talk">
   <button id="mic">Hold to talk</button>
-  <div class="row"><input type="text" id="txt" placeholder="Put the red block in the green zone" enterkeyhint="send"><button class="btn primary" style="flex:none;width:80px" id="send">Send</button></div>
+  <div class="row"><input type="text" id="txt" placeholder="Put the glass next to the chocolate" enterkeyhint="send"><button class="btn primary" style="flex:none;width:80px" id="send">Send</button></div>
   <div class="chips" id="chips"></div>
   <p class="small" id="micNote"></p>
 </section>
@@ -93,9 +93,9 @@ video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:
     <button class="btn" id="finish" disabled>Finish (0)</button>
   </div>
   <div class="row"><button class="btn" id="snap">One photo (works with everyday objects)</button></div>
-  <p class="small">Keep the whole white A4 sheet in view. Walk slowly halfway round the table.</p>
+  <p class="small">Keep the whole table surface in view and hold the phone steady.</p>
   <div class="row"><button class="btn blue" id="demoRec">● Record a demo with your hand</button></div>
-  <p class="small">Hold the phone still above the table (sheet in view), tap record, move one block into a zone with your hand, tap stop. Pip learns from it.</p>
+  <p class="small">Hold the phone still with the whole table in view, tap record, move one object with your hand, keep filming 2 seconds, tap stop. Pip learns from it.</p>
 </section>
 
 <button id="stop">STOP</button>
@@ -125,8 +125,7 @@ function renderState() {
   const s = state;
   let txt = s.halted ? `STOPPED (${s.halt_reason})` :
     s.mode === 'teach' ? `Teaching: ${s.task?.instruction || ''}` :
-    s.mode === 'auto' ? `Pip is working${s.plan ? ' · ' + s.plan.sure + '% sure' : ''}` :
-    s.mode === 'correct' ? 'Your turn: correcting Pip' :
+    s.mode === 'move' ? `Pip is working${s.plan ? ' · ' + s.plan.sure + '% sure' : ''}` :
     s.mode === 'review' ? `Demo scored ${s.review?.score}. Keep it?` :
     s.mode === 'replay' ? 'Pip is replaying your video' :
     s.pending ? s.pending : (s.authority === 'robot' ? 'Pip has control' : 'You have control');
@@ -249,7 +248,7 @@ function renderChips(props) {
   chipKey = key;
   const first = names.length
     ? [`Put the ${names[0]} next to the ${names[1] || names[0]}`, names[1] ? `Move the ${names[1]} to the left` : 'Move it to the left']
-    : ['Put the red block in the green zone', 'Put the blue block in the blue tray'];
+    : [];
   $('#chips').innerHTML = '';
   [...first, 'What do you see?', 'How sure are you?', 'Why did you stop?', 'Continue'].forEach(c => {
     const b = document.createElement('button'); b.className = 'chip'; b.textContent = c; b.onclick = () => say(c); $('#chips').appendChild(b);

@@ -20,11 +20,10 @@ from fastapi.staticfiles import StaticFiles
 from . import config
 from . import twin_import as TI
 from .ai.brain import Brain
-from .features import video_demo as VD
 from .features import video_everyday as VE
-from .features.vision import decode
+from .features.imageutil import decode
 from .router import Intent, route
-from .scene import ZONE_LABEL, Layout
+from .scene import Layout
 from .sim import Sim
 
 app = FastAPI()
@@ -175,14 +174,11 @@ async def upload_demo(files: list[UploadFile] = File(...)):
 async def process_demo_upload(blobs):
     if len(blobs) == 1 and not blobs[0][1].startswith("image/"):
         emit({"t": "demo", "stage": "decoding"})
-        ends = await asyncio.to_thread(VE.frames_from_video_ends, blobs[0][2])
-        if ends and await asyncio.to_thread(VE.frames_everyday_ok, ends):
-            return await process_everyday_video(ends)
-        frames, fps = await asyncio.to_thread(VD.frames_from_video, blobs[0][2])
+        frames = await asyncio.to_thread(VE.frames_from_video_ends, blobs[0][2])
     else:
         blobs.sort(key=lambda b: b[0])
-        frames, fps = [img for img in (decode(b[2]) for b in blobs) if img is not None], 5.0
-    await process_video_demo(frames, fps)
+        frames = [img for img in (decode(b[2]) for b in blobs) if img is not None]
+    await process_video_demo(frames)
 
 
 async def process_everyday_video(frames):
@@ -216,34 +212,11 @@ async def process_everyday_video(frames):
     sim.submit(sim.play_prop_video, plan, f"I watched you move the {name} {where}. Let me try it in my twin.")
 
 
-async def process_video_demo(frames, fps: float):
-    if frames and await asyncio.to_thread(VE.frames_everyday_ok, frames):
-        return await process_everyday_video(frames)
-    emit({"t": "demo", "stage": "processing", "frames": len(frames)})
+async def process_video_demo(frames):
     if len(frames) < 3:
         sim.submit(sim.say, "That video is too short. Show me the whole move.")
         return
-    sim.submit(sim.say, "Watching your video.")
-    zones_mm = None
-    if sim.scan:
-        zones_mm = {z: (v["x"], v["y"]) for z, v in sim.scan["objects"].items() if z in ("green", "tray")}
-    try:
-        res = await asyncio.to_thread(VD.analyse, frames, fps, zones_mm)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        res = {"error": f"I couldn't read that video ({e})."}
-    emit({"t": "demo", "stage": "done", "result": {k: v for k, v in res.items() if k != "path"}})
-    if "error" in res:
-        sim.submit(sim.say, res["error"])
-        return
-    label = ZONE_LABEL[res["target"]]
-    where = "to" if res["in_zone"] else "near"
-    emit({"t": "log", "who": "system",
-          "text": f"Video: {res['object']} block moved {where} the {label} "
-                  f"({res['frames_used']}/{res['frames']} frames, {res['duration']:.1f}s)"})
-    sim.submit(sim.play_video_demo, VD.to_sim(res),
-               f"I watched you move the {res['object']} block {where} the {label}. Let me try it in my twin.")
+    await process_everyday_video(frames)
 
 
 # ---------------- speech / text ----------------
@@ -272,8 +245,8 @@ async def handle_text(text: str, source: str):
         if plan:
             sim.submit(sim.handle_prop_task, plan, text)
             return
-        if not sim.world.objects() and it.kind in ("other", "slot", "task"):
-            # everyday scene: understand odd phrasings with the AI, using the real object names
+        if it.kind == "other":
+            # understand odd phrasings with the AI, using the real object names
             names = [p["name"] for p in props]
             if brain.enabled:
                 emit({"t": "thinking", "on": True})
@@ -293,25 +266,10 @@ async def handle_text(text: str, source: str):
             sim.submit(sim.say, f"I can move the {names[0]}" + (f" or the {names[1]}" if len(names) > 1 else "")
                        + ". Tell me which one and where.")
             return
-    if brain.enabled and (it.kind == "other" or (it.kind == "slot" and sim.pending is None)):
-        emit({"t": "thinking", "on": True})
-        parsed = await brain.parse_intent(text)
-        emit({"t": "thinking", "on": False})
-        if parsed:
-            if parsed.get("action") == "place" and parsed.get("object") in ("red", "blue", "yellow") \
-                    and parsed.get("target") in ZONE_LABEL:
-                it = Intent("task", "task", {"object": parsed["object"], "target": parsed["target"],
-                                             "instruction": text}, text=text)
-                emit({"t": "log", "who": "system", "text": f"AI understood: {parsed['object']} → {parsed['target']}"})
-            elif parsed.get("action") == "cleanup":
-                it = Intent("task", "task", {"cleanup": True, "instruction": text}, text=text)
-            elif parsed.get("clarify"):
-                sim.submit(sim.say, str(parsed["clarify"])[:120])
-                return
-        if it.kind == "other":
-            reply = await brain.chat(text)
-            sim.submit(sim.say, reply or "I only do blocks and zones.")
-            return
+    if not props and it.kind == "other":
+        reply = await brain.chat(text) if brain.enabled else None
+        sim.submit(sim.say, reply or "Scan your table first, so I know what is on it.")
+        return
     sim.submit(sim.handle_intent, it)
     if it.kind == "scene_q" and it.name == "see" and brain.enabled and latest_photo["jpeg"]:
         asyncio.ensure_future(describe_photo(text))
@@ -385,13 +343,10 @@ async def process_everyday(frames: list[bytes], pitches: list):
 def _apply_doc(doc: dict, folder: pathlib.Path, sid: str, how: str):
     lay = TI.doc_to_layout(doc, folder)
     names = [p["name"] for p in lay.props]
-    blocks = [n for n, o in lay.objects.items() if o.get("present", True)]
     from .features.everyday import listing
     seen = []
     if names:
         seen.append(listing(names))
-    if blocks:
-        seen.append(("a " + ", a ".join(blocks)) + " block" + ("s" if len(blocks) > 1 else ""))
     extra = f" and {len(lay.scene)} 3D scan{'s' if len(lay.scene) != 1 else ''}" if lay.scene else ""
     summary = {"id": sid, "mode": "file", "props": names, "objects": {}, "unsure": [], "thumbs": [],
                "views": 0, "frames": 0, "seconds": 0, "scene": len(lay.scene), "name": doc.get("name", "twin"),
@@ -576,7 +531,7 @@ async def on_message(m: dict, role: str):
     elif t == "demo_end":
         jpegs, scan_buf["frames"] = scan_buf["frames"], []
         frames = [img for img in (decode(j) for j in jpegs) if img is not None]
-        asyncio.ensure_future(process_video_demo(frames, float(m.get("fps", 5))))
+        asyncio.ensure_future(process_video_demo(frames))
     elif t == "snap":  # one photo: quick one-view scan
         if not config.FEATURE_CAMERA:
             return

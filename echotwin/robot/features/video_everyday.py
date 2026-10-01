@@ -1,4 +1,4 @@
-"""Learn from a video of your hand moving an everyday object (hand-held phone, plain table, no sheet).
+"""Learn from a video of your hand moving an everyday object (hand-held phone, plain table).
 
 Only the start and the end of the video matter:
   1. pick a clean frame near the start and near the end (most objects visible, sharp, no hand)
@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 
 from . import everyday as E
-from . import vision as V
+from . import imageutil as V
 
 PITCH = 50.0
 NEAR_GAP = 0.06      # metres between object edges that still counts as "next to"
@@ -198,12 +198,3 @@ def frames_from_video_ends(data: bytes, per_end: int = 8, part: float = 0.2) -> 
     cap.release()
     Path(path).unlink(missing_ok=True)
     return out
-
-
-def frames_everyday_ok(frames: list[np.ndarray]) -> bool:
-    """True when no A4 sheet is visible (so the block tracker does not apply)."""
-    for f in frames[:: max(1, len(frames) // 6)][:6]:
-        c = V.find_sheet(f)
-        if c is not None and V.pose_candidates(c, f.shape):
-            return False
-    return True

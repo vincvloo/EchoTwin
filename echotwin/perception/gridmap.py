@@ -113,6 +113,7 @@ class GridMap:
     def save(self, stem: str | Path):
         """Write ROS map_server compatible <stem>.png + <stem>.yaml."""
         stem = Path(stem)
+        stem.parent.mkdir(parents=True, exist_ok=True)
         img = np.full(self.occ.shape, 205, np.uint8)          # unknown = grey
         img[self.known & ~self.occ] = 254                      # free = white
         img[self.occ] = 0                                      # occupied = black

@@ -21,7 +21,7 @@ from ..scene import Layout
 @dataclass
 class TwinContext:
     apply: Callable[[Layout, dict], None]
-    """Show a new twin. summary keys used by the dashboard: id, mode ('blocks'|'everyday'|'file'), greeting,
+    """Show a new twin. summary keys used by the dashboard: id, mode ('everyday'|'file'), greeting,
     twin (image url), texture (image url), props (list of names), objects, thumbs, views, frames, seconds."""
     rename: Callable[[list, str], None]
     """Replace the everyday objects (e.g. with AI names and shapes) and say a line."""

@@ -15,7 +15,7 @@ cheap ultrasonic sensors instead of a laser.
 5. **Review** *(planned)*: an NVIDIA vision model confirms or corrects each detection.
 6. **Scene file** *(planned)*: one file both halves read.
 7. **Use the map**: (a) a sonar robot localizes in the room; (b) a table becomes a digital twin.
-8. **Act and learn**: tell the robot what to move. It does it, says it is already done, or asks you to show it once.
+8. **Act and learn**: tell the robot what to move ("put the glass next to the chocolate"). It does it, says it is already done, or asks you to show it once.
 
 Details: [docs/PIPELINE.md](docs/PIPELINE.md). Other capture methods and why photos are the main one:
 [docs/APPROACHES.md](docs/APPROACHES.md). Roadmap: [docs/TASKS.md](docs/TASKS.md).

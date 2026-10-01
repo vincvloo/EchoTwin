@@ -1,6 +1,6 @@
 """Language-conditioned demonstration dataset (LeRobot-style fields, stored as JSON).
 
-Each episode: {episode_index, task:{instruction, object, target}, source: seed|human|correction,
+Each episode: {episode_index, task:{instruction, object, target, goal, shape...}, source: human|practice|video,
 frames:[{timestamp, state, action}], success, score, quality, duration}.
 observation.state = [hand x,y,z, grip, object x,y,z, target x,y, carrying]
 action            = [vx, vy, vz, grip]
@@ -14,16 +14,16 @@ import numpy as np
 from .config import EPISODES
 from .world import CTRL_DT, World
 
-STATE_NAMES = ["hand.x", "hand.y", "hand.z", "grip", "obj.x", "obj.y", "obj.z", "target.x", "target.y", "carrying"]
+STATE_NAMES = ["hand.x", "hand.y", "hand.z", "grip", "obj.x", "obj.y", "obj.z", "goal.x", "goal.y", "carrying"]
 ACTION_NAMES = ["vx", "vy", "vz", "grip"]
 TELEOP_CHF_PER_HOUR = 60.0
 
 
-def state_vector(world: World, obj: str, target: str, d=None, hs=None) -> list[float]:
+def state_vector(world: World, obj: str, goal, d=None, hs=None) -> list[float]:
     hs = hs if hs is not None else world.hand
     h = world.hand_pos(d)
     o = world.obj_pos(obj, d)
-    t = world.zone_pos(target) if isinstance(target, str) else np.asarray(target, dtype=float)
+    t = np.asarray(goal, dtype=float)
     return [*map(float, h), float(hs.grip), *map(float, o), float(t[0]), float(t[1]),
             1.0 if hs.attached == obj else 0.0]
 
@@ -63,16 +63,13 @@ class Dataset:
         self.episodes.append(ep)
         return ep
 
-    def count(self, target: str, sources=("seed", "human")) -> int:
-        return sum(1 for e in self.episodes if e["task"]["target"] == target and e["source"] in sources)
-
     def stats(self) -> dict:
         per_target, per_source = {}, {}
         for e in self.episodes:
             t = e["task"]["target"]
-            per_target[t] = per_target.get(t, 0) + (e["source"] != "correction")
+            per_target[t] = per_target.get(t, 0) + 1
             per_source[e["source"]] = per_source.get(e["source"], 0) + 1
-        human = [e for e in self.episodes if e["source"] in ("human", "correction")]
+        human = [e for e in self.episodes if e["source"] in ("human", "correction", "video")]
         mins = sum(e["duration"] for e in human) / 60
         return {
             "episodes": len(self.episodes), "per_target": per_target, "per_source": per_source,
@@ -80,6 +77,6 @@ class Dataset:
             "human_minutes": round(mins, 2),
             "teleop_cost_chf": round(mins / 60 * TELEOP_CHF_PER_HOUR, 2),
             "recent": [{"i": e["episode_index"], "instruction": e["task"]["instruction"], "source": e["source"],
-                        "score": e["score"], "quality": e["quality"], "kind": e["task"].get("kind", "block")}
+                        "score": e["score"], "quality": e["quality"], "kind": e["task"].get("kind", "prop")}
                        for e in self.episodes[-30:]][::-1],
         }

@@ -15,9 +15,6 @@ from echotwin.robot.world import World
 
 def _everyday():
     lay = Layout()
-    lay.show_zones = False
-    for o in lay.objects.values():
-        o["present"] = False
     lay.meta["sim_scale"] = 2.0
     lay.props = [
         {"name": "glass of water", "shape": "cylinder", "pos": (-0.1, 0.1), "size": (0.05, 0.05, 0.07), "rgb": (0.8, 0.8, 0.8)},
@@ -44,12 +41,11 @@ def test_save_and_load_round_trip():
 def test_hand_written_twin_file():
     doc = {"format": "phone-puppeteer-twin", "sim_scale": 2.0,
            "objects": [{"name": "mug", "shape": "cylinder", "size_cm": [8, 8, 10], "pos_cm": [0, 5]}],
-           "blocks": [{"color": "red", "pos_cm": [-10, -5]}],
-           "zones": [{"name": "green", "pos_cm": [10, 5], "size_cm": [7, 7]}]}
+           "blocks": [{"color": "red", "pos_cm": [-10, -5]}]}   # old block files still load; blocks are ignored
     d = Path(tempfile.mkdtemp())
     lay = TI.doc_to_layout(json.loads(json.dumps(doc)), d)
     w = World(lay)
-    assert w.objects() == ["red"] and w.layout.props[0]["name"] == "mug"
+    assert w.things() == ["prop_0"] and w.layout.props[0]["name"] == "mug"
     with pytest.raises(TI.ImportError_):
         TI.doc_to_layout({"objects": [{"name": "x", "shape": "banana", "pos_cm": [0, 0]}]}, d)
 

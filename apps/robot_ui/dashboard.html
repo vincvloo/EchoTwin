@@ -102,7 +102,7 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
   <div>
     <div id="videoWrap"><img id="video" src="/video.mjpg" alt="simulation"><div id="badge">…</div><div id="said"></div></div>
     <div id="ask">
-      <input id="txt" placeholder="Tell Pip… e.g. put the blue block in the blue tray" autocomplete="off">
+      <input id="txt" placeholder="Tell Pip… e.g. put the glass next to the chocolate" autocomplete="off">
       <button id="micBtn">🎤</button>
       <button class="primary" id="sendBtn">Send</button>
     </div>
@@ -111,7 +111,6 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
       <button data-say="continue">Continue</button>
       <button data-say="your turn">Your turn</button>
       <button data-say="my turn">My turn</button>
-      <button data-say="new scene">New scene</button>
       <button data-say="reset">Back to scan</button>
       <button data-say="what do you see?">What do you see?</button>
       <button data-say="how sure are you?">How sure?</button>
@@ -149,7 +148,7 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
     <h2>1 · Check your photos</h2>
     <div id="drop"><b>Drop photos here</b> or <button class="primary" id="checkPick">Choose photos…</button>
       <input type="file" id="checkFiles" accept="image/*" multiple hidden>
-      <div style="color:var(--dim);font-size:12px;margin-top:6px">Blocks on an A4 sheet, or everyday things on any table (glass, chocolate, case…). Each photo is checked; untick bad ones, then build. Everyday mode uses the sharpest photo.</div></div>
+      <div style="color:var(--dim);font-size:12px;margin-top:6px">Everyday things on any table (glass, chocolate, case…). Each photo is checked; untick bad ones, then build. The sharpest photo is used.</div></div>
     <div id="checkGrid"></div>
     <div id="checkBar" style="display:none;margin-top:12px;display:none;align-items:center;gap:12px">
       <button class="primary" id="checkBuild">Build twin</button><span id="checkSummary" style="color:var(--dim)"></span>
@@ -191,7 +190,6 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const ZL = { green: 'green zone', tray: 'blue tray' };
 let ws, state = {}, soundOn = false, audio = new Audio(), lastDecision = null;
 
 fetch('/api/info').then(r => r.json()).then(i => {
@@ -256,20 +254,19 @@ function renderState() {
   if (key !== sceneKey) {  // the scene changed: examples and dataset list follow it
     sceneKey = key;
     const n = (s.props || []).map(p => p.name);
-    $('#txt').placeholder = n.length ? `Tell Pip… e.g. put the ${n[0]} next to the ${n[1] || n[0]}` : 'Tell Pip… e.g. put the blue block in the blue tray';
+    $('#txt').placeholder = n.length ? `Tell Pip… e.g. put the ${n[0]} next to the ${n[1] || n[0]}` : 'Scan your table first, then tell Pip what to move';
     if (lastStats) renderStats(lastStats);
   }
   const b = $('#badge');
-  b.textContent = s.halted ? `■ STOPPED (${s.halt_reason})` : (s.mode === 'auto' || s.mode === 'move') ? '● Pip is acting' : s.mode === 'practice' ? '● Practising in the twin' :
+  b.textContent = s.halted ? `■ STOPPED (${s.halt_reason})` : s.mode === 'move' ? '● Pip is acting' : s.mode === 'practice' ? '● Practising in the twin' :
     s.mode === 'teach' ? (s.recording ? '● Recording your demo' : 'Teach me: your turn') :
-    s.mode === 'correct' ? '● Recording your correction' : s.mode === 'replay' ? '▶ Replaying your video' : s.mode === 'review' ? `Demo scored ${s.review?.score} · keep?` :
+    s.mode === 'replay' ? '▶ Replaying your video' : s.mode === 'review' ? `Demo scored ${s.review?.score} · keep?` :
     (s.authority === 'robot' ? 'Pip has control' : 'You have control');
-  b.style.color = s.halted ? 'var(--stop)' : (s.mode === 'auto' || s.mode === 'move') ? 'var(--blue)' : (s.mode === 'teach' || s.mode === 'correct' || s.mode === 'replay') ? 'var(--teach)' : 'var(--text)';
+  b.style.color = s.halted ? 'var(--stop)' : s.mode === 'move' ? 'var(--blue)' : (s.mode === 'teach' || s.mode === 'replay') ? 'var(--teach)' : 'var(--text)';
   $('#ctrl').textContent = s.authority === 'robot' ? 'Pip' : 'You (phone)';
   const d = $('#demos'); d.innerHTML = '';
-  // everyday scene: know-how per object type; block scene: demos per zone
-  const cards = s.skills ? Object.keys(s.skills).map(k => [s.skill_labels[k], s.skills[k], 1])
-                         : ['green', 'tray'].map(z => [ZL[z], s.demos?.[z] || 0, s.min_demos || 2]);
+  // know-how per object type
+  const cards = s.skills ? Object.keys(s.skills).map(k => [s.skill_labels[k], s.skills[k], 1]) : [];
   d.style.flexWrap = 'wrap';
   for (const [label, n, need] of cards) {
     const dots = Array.from({ length: Math.max(need, Math.min(n, 8)) }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('');
@@ -292,12 +289,12 @@ function renderDecision() {
   const t = m.task;
   $('#taskline').textContent = t ? `“${t.instruction}”` : '';
   if (m.kind === 'done') { el.textContent = '✓ Already done'; el.className = 'done'; $('#sure').style.width = '100%'; $('#sureTxt').textContent = 'goal is true'; $('#why').textContent = m.why || 'checked the world state'; }
-  if (m.kind === 'do') { el.textContent = (state.mode === 'auto' || state.mode === 'move') ? '→ Doing it' : (state.mode === 'correct' ? '? Asked for help' : '✓ Did it'); el.className = 'do'; }
+  if (m.kind === 'do') { el.textContent = state.mode === 'move' ? '→ Doing it' : '✓ Did it'; el.className = 'do'; }
   if (m.kind === 'teach') {
     el.textContent = state.mode === 'review' ? '★ Keep this demo?' : '✎ Teach me'; el.className = 'teach';
     $('#sure').style.width = '5%'; $('#sure').style.background = 'var(--teach)';
     $('#sureTxt').textContent = 'not yet';
-    $('#why').textContent = m.why || { new: 'no demos for this zone', more: 'not enough demos yet', unsure: 'layout unlike my demos', video: 'learning from your video', new_kind: 'never handled this kind of object', failed: 'the real run went wrong' }[m.reason] || m.reason;
+    $('#why').textContent = m.why || { unsure: 'layout unlike my demos', video: 'learning from your video', new_kind: 'never handled this kind of object', failed: 'the real run went wrong' }[m.reason] || m.reason;
     if (m.reason === 'video' && state.mode !== 'review') el.textContent = '▶ Learning from video';
   }
 }
@@ -313,11 +310,9 @@ function onScan(m) {
   if (m.stage === 'capturing') { st.textContent = 'Phone is capturing…'; $('#thumbs').innerHTML = ''; }
   if (m.stage === 'receiving') st.textContent = `Receiving frames: ${m.n}`;
   if (m.stage === 'processing') st.textContent = `Processing ${m.frames} frames…`;
-  if (m.stage === 'frames') st.textContent = `Sheet found in ${m.with_sheet} of ${m.received} frames. Picking views…`;
-  if (m.stage === 'view') { st.textContent = `Fusing view ${m.n}/${m.of}: ${m.found.join(', ') || 'nothing'}`; $('#thumbs').insertAdjacentHTML('beforeend', `<img src="${m.thumb}">`); }
   if (m.stage === 'done') { renderScan(m.summary); setTimeout(loadTwin, 800); }
   if (m.stage === 'error') st.textContent = 'Scan failed: ' + m.error;
-  if (m.stage === 'everyday') st.textContent = 'No A4 sheet: mapping everyday objects from the sharpest photo…';
+  if (m.stage === 'everyday') st.textContent = 'Mapping everyday objects from the sharpest photo…';
 }
 function renderScan(s) {
   if (s.mode === 'file') {
@@ -327,17 +322,12 @@ function renderScan(s) {
     return;
   }
   if (s.mode === 'everyday') {
-    $('#scanStatus').textContent = `Everyday objects from one photo (no A4 sheet)${s.pitch ? ', camera tilt ' + Math.round(s.pitch) + '°' : ''}. Approximate map.`;
+    $('#scanStatus').textContent = `Everyday objects from one photo${s.pitch ? ', camera tilt ' + Math.round(s.pitch) + '°' : ''}. Approximate map.`;
     $('#twin').src = s.twin + (s.twin.includes('?') ? '&' : '?') + Date.now();
     $('#thumbs').innerHTML = '';
     $('#dets').innerHTML = '<tr><th>#</th><th>Object</th></tr>' + (s.props || []).map((n, i) => `<tr><td>${i + 1}</td><td>${esc(n)}</td></tr>`).join('');
     return;
   }
-  $('#scanStatus').textContent = `${s.views} views fused from ${s.frames} frames (sheet in ${s.with_sheet}) in ${s.seconds}s${s.fallback ? ' · one-photo fallback' : ''}.`;
-  $('#twin').src = s.twin + '?' + s.id;
-  $('#thumbs').innerHTML = s.thumbs.map(t => `<img src="${t}">`).join('');
-  const rows = Object.entries(s.objects).map(([k, v]) => `<tr><td>${k === 'tray' ? 'blue tray' : k === 'green' ? 'green zone' : k + ' block'}</td><td>${v.x.toFixed(0)}, ${v.y.toFixed(0)} mm</td><td>${v.seen_in_n_views}/${s.views} views</td><td>${s.unsure.includes(k) ? '<span style="color:var(--warn)">unsure</span>' : '✓'}</td></tr>`).join('');
-  $('#dets').innerHTML = `<tr><th>Object</th><th>Position on sheet</th><th>Seen in</th><th></th></tr>` + rows;
 }
 
 // ---------- dataset ----------

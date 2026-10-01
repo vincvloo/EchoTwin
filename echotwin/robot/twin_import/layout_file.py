@@ -14,8 +14,6 @@ y away from the viewer. The sim is drawn "sim_scale" times bigger (sim metres pe
      "skin": "skins/prop_0.png",                          # optional photo wrapped on the shape
      "mesh": "meshes/choc.obj", "mesh_texture": "meshes/choc.png"}   # optional 3D-scanned shape
   ],
-  "blocks": [{"color": "red", "pos_cm": [-7, -4], "size_cm": 2.2}],   # optional: block demo
-  "zones": [{"name": "green", "pos_cm": [8, 6], "size_cm": [7, 6]}], "show_zones": true,
   "scene": [{"mesh": "scene/room.obj", "texture": "scene/room.png",   # optional 3D scan of the room
              "pos_cm": [0, 0, -37.5], "euler_deg": [0, 0, 0], "scale": 1.0}],  # scale: real metres per mesh unit
   "camera": {"pos_cm": [...], "xyaxes": [...], "fovy": 60}             # optional viewpoint
@@ -29,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..scene import CUBE_HALF, DEFAULT_ZONES, OBJECT_NAMES, Layout
+from ..scene import Layout
 from .contract import ImportError_
 
 FORMAT = "phone-puppeteer-twin"
@@ -73,8 +71,7 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
     k = float(layout.meta.get("sim_scale", 2.0))
     cm = lambda v: round(float(v) / k * 100, 2)
     doc = {"format": FORMAT, "version": 1, "name": layout.meta.get("name", name), "sim_scale": k,
-           "table_texture": _copy(layout.texture, file_dir, "."), "objects": [], "blocks": [], "zones": [],
-           "show_zones": layout.show_zones, "scene": []}
+           "table_texture": _copy(layout.texture, file_dir, "."), "objects": [], "scene": []}
     if doc["table_texture"]:
         doc["table_texture"] = doc["table_texture"].lstrip("./")
     for i, pr in enumerate(layout.props):
@@ -89,13 +86,6 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
             if rel:
                 o[key] = rel
         doc["objects"].append(o)
-    for n, o in layout.objects.items():
-        if o.get("present", True):
-            pos = world.obj_pos(n) if world is not None else (*o["pos"], 0)
-            doc["blocks"].append({"color": n, "pos_cm": [cm(pos[0]), cm(pos[1])], "size_cm": cm(2 * o["half"])})
-    for n, z in layout.zones.items():
-        doc["zones"].append({"name": n, "pos_cm": [cm(z["pos"][0]), cm(z["pos"][1])],
-                             "size_cm": [cm(2 * z["half"][0]), cm(2 * z["half"][1])]})
     for m in layout.scene:
         e = {"mesh": _copy(m["file"], file_dir, "scene"), "pos_cm": [cm(v) for v in m.get("pos", (0, 0, 0))],
              "euler_deg": list(m.get("euler", (0, 0, 0))), "scale": round(m.get("scale", k) / k, 6)}
@@ -127,20 +117,8 @@ def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
     lay = Layout()
     lay.meta = {"sim_scale": k, "name": doc.get("name", "twin")}
     lay.texture = f(doc.get("table_texture"))
-    lay.show_zones = bool(doc.get("show_zones", True))
-    for n in OBJECT_NAMES:
-        lay.objects[n] = {"pos": (0.0, 0.0), "half": CUBE_HALF, "present": False}
-    for b in doc.get("blocks", []):
-        if b.get("color") not in OBJECT_NAMES:
-            raise ImportError_(f"Unknown block colour {b.get('color')!r} (use red, blue, yellow).")
-        lay.objects[b["color"]] = {"pos": (m(b["pos_cm"][0]), m(b["pos_cm"][1])),
-                                   "half": m(b.get("size_cm", CUBE_HALF * 2 / k * 100)) / 2, "present": True}
-    zones = {z["name"]: z for z in doc.get("zones", [])}
-    for zn in DEFAULT_ZONES:
-        if zn in zones:
-            z = zones[zn]
-            lay.zones[zn] = {"pos": (m(z["pos_cm"][0]), m(z["pos_cm"][1])),
-                             "half": (m(z["size_cm"][0]) / 2, m(z["size_cm"][1]) / 2)}
+    if doc.get("blocks") or doc.get("zones"):
+        print("[twin] this file has coloured blocks or zones; they are no longer supported and are ignored.")
     for i, o in enumerate(doc.get("objects", [])):
         shape = o.get("shape", "box")
         if shape not in SHAPES:

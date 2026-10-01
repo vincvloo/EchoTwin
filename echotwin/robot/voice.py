@@ -12,11 +12,11 @@ import httpx
 from . import config
 
 CACHED_PHRASES = [
-    "Stopped.", "Continuing.", "Gripping.", "Releasing.", "Correction noted.", "Can you show me?",
+    "Stopped.", "Continuing.", "Gripping.", "Releasing.", "Can you show me?",
     "I haven't learned that yet. Can you show me?", "Done.", "Thanks. Try me again.", "Keep this demo?",
-    "Discarded.", "Which block should I move: red, blue or yellow?", "Where to: the green zone or the blue tray?",
-    "I'm not sure here. Can you take over?", "Your turn. I'm recording.", "Looking…",
-    "I only do blocks and zones.", "I'm fairly sure about this one.", "I'm confident about this one.",
+    "Discarded.",
+    "Your turn.", "Looking…",
+    "I'm fairly sure about this one.", "I'm confident about this one.",
 ]
 
 

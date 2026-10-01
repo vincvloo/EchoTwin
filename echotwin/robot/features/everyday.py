@@ -1,4 +1,4 @@
-"""Everyday objects: map a real table with ordinary things from ONE photo, no A4 sheet needed.
+"""Everyday objects: map a real table with ordinary things from ONE photo.
 
 Geometry comes from classic vision (reliable, offline); names come from the AI (optional):
   1. the table surface = the region matching the colour at the bottom centre of the photo

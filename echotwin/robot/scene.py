@@ -1,55 +1,28 @@
-"""MuJoCo scene generation: table, coloured cubes, movable zones, floating gripper.
+"""MuJoCo scene generation: table, everyday objects (props), static scenery, floating gripper.
 
-Coordinates: the A4 sheet (297 x 210 mm) is the workspace, centred at the origin,
-x to the right, y away from the user ("back"), z up. The sim is SCALE x real size so
-small props become comfortably graspable cubes.
+Coordinates: the table centre is the origin, x to the right, y away from the user ("back"), z up.
+The sim is SCALE x real size so small objects become comfortably graspable.
 """
 from dataclasses import dataclass, field
 
 SCALE = 2.0
-SHEET_MM = (297.0, 210.0)
-WS_HALF = (SHEET_MM[0] / 2000 * SCALE, SHEET_MM[1] / 2000 * SCALE)  # 0.297 x 0.21 m
-TABLE_HALF = (2 * WS_HALF[0], 2 * WS_HALF[1])                      # scan texture covers this
-CUBE_HALF = 0.022
+WS_HALF = (297.0 / 2000 * SCALE, 210.0 / 2000 * SCALE)             # 0.297 x 0.21 m work area
+TABLE_HALF = (2 * WS_HALF[0], 2 * WS_HALF[1])                      # the table texture covers this
 HOME = (0.0, -0.16, 0.20)
-
-OBJECT_NAMES = ("red", "blue", "yellow")
-ZONE_NAMES = ("green", "tray")
-ZONE_LABEL = {"green": "green zone", "tray": "blue tray"}
-
-RGB = {
-    "red": (0.86, 0.14, 0.12),
-    "blue": (0.14, 0.34, 0.88),
-    "yellow": (0.96, 0.80, 0.12),
-    "green": (0.16, 0.72, 0.30),
-    "tray": (0.14, 0.40, 0.95),
-}
-
-DEFAULT_ZONES = {
-    "green": {"pos": (0.17, 0.12), "half": (0.07, 0.06)},
-    "tray": {"pos": (-0.17, 0.12), "half": (0.07, 0.06)},
-}
 
 
 @dataclass
 class Layout:
-    """Where things are. Objects: name -> {pos:(x,y), half, present}. Zones: name -> {pos, half}."""
-    objects: dict = field(default_factory=lambda: {
-        n: {"pos": (x, -0.08), "half": CUBE_HALF, "present": True}
-        for n, x in zip(OBJECT_NAMES, (-0.15, 0.0, 0.15))})
-    zones: dict = field(default_factory=lambda: {k: dict(v) for k, v in DEFAULT_ZONES.items()})
+    """Where things are. props: everyday objects {name, pos, size (half xyz), rgb, shape, ...}."""
     texture: str | None = None  # absolute path to a top-down table texture (from a scan)
-    props: list = field(default_factory=list)  # everyday objects: {name, pos, size(half xyz), rgb, shape}
-    show_zones: bool = True
+    props: list = field(default_factory=list)
     view: dict | None = None  # camera where the phone was: {pos, xyaxes, fovy}
     # 3D scans: scenery meshes (visual only): {file, texture?, pos(3), euler(3, deg), scale}
     scene: list = field(default_factory=list)
     meta: dict = field(default_factory=dict)  # e.g. {"sim_scale": sim metres per real metre, "name": ...}
 
     def copy(self) -> "Layout":
-        return Layout({k: dict(v) for k, v in self.objects.items()},
-                      {k: dict(v) for k, v in self.zones.items()}, self.texture,
-                      [dict(p) for p in self.props], self.show_zones, self.view,
+        return Layout(self.texture, [dict(p) for p in self.props], self.view,
                       [dict(m) for m in self.scene], dict(self.meta))
 
 
@@ -63,20 +36,8 @@ def build_xml(layout: Layout) -> str:
         tex = layout.texture.replace("\\", "/")
         table_asset = (f'<texture name="tabletex" type="2d" file="{tex}"/>'
                        '<material name="tabletop" texture="tabletex" texrepeat="1 1" texuniform="false"/>')
-        sheet = ""
     else:
         table_asset = '<material name="tabletop" rgba="0.62 0.50 0.38 1"/>'
-        sheet = (f'<geom name="sheet" type="box" pos="0 0 0.0006" size="{_f(WS_HALF[0], WS_HALF[1], 0.0005)}" '
-                 'rgba="0.95 0.95 0.93 1" contype="0" conaffinity="0"/>')
-
-    zones = []
-    for name, z in layout.zones.items():
-        r, g, b = RGB[name]
-        hx, hy = z["half"]
-        zones.append(
-            f'<body name="zone_{name}" pos="{_f(z["pos"][0], z["pos"][1], 0)}">'
-            f'<geom name="zone_{name}" type="box" pos="0 0 0.0015" size="{_f(hx, hy, 0.001)}" '
-            f'rgba="{_f(r, g, b)} {0.75 if layout.show_zones else 0}" contype="0" conaffinity="0"/></body>')
 
     props, prop_assets = [], []
     for i, pr in enumerate(layout.props):
@@ -121,19 +82,6 @@ def build_xml(layout: Layout) -> str:
         scenery.append(f'<geom name="scene_{k}" type="mesh" mesh="scene_{k}" pos="{_f(*m.get("pos", (0, 0, 0)))}" '
                        f'euler="{_f(*m.get("euler", (0, 0, 0)))}" {look} contype="0" conaffinity="0"/>')
 
-    objs = []
-    for i, (name, o) in enumerate(layout.objects.items()):
-        r, g, b = RGB[name]
-        h = o["half"]
-        if o.get("present", True):
-            pos, alpha = (o["pos"][0], o["pos"][1], h + 0.0005), 1
-        else:  # parked on the floor, invisible
-            pos, alpha = (2.0 + 0.2 * i, 2.0, -0.75 + h), 0
-        objs.append(
-            f'<body name="obj_{name}" pos="{_f(*pos)}"><freejoint name="obj_{name}"/>'
-            f'<geom name="obj_{name}" type="box" size="{_f(h, h, h)}" rgba="{_f(r, g, b)} {alpha}" '
-            'mass="0.05" friction="1.2 0.02 0.001" condim="4"/></body>')
-
     fingers = "".join(
         f'<body name="finger_{s}" mocap="true" pos="{_f(HOME[0] + dx, HOME[1], HOME[2] + 0.008)}">'
         '<geom type="box" size="0.006 0.013 0.026" rgba="0.82 0.84 0.88 1" contype="0" conaffinity="0"/></body>'
@@ -160,11 +108,8 @@ def build_xml(layout: Layout) -> str:
     <geom name="table" type="box" pos="0 0 -0.02" size="{_f(tw + 0.02, th + 0.02, 0.02)}" rgba="0.36 0.27 0.20 1"/>
     <geom name="tabletop" type="plane" pos="0 0 0.0002" size="{_f(tw, th, 0.01)}" material="tabletop" contype="0" conaffinity="0"/>
     {"".join(f'<geom type="box" pos="{_f(sx * (tw - 0.04), sy * (th - 0.04), -0.39)}" size="0.025 0.025 0.35" rgba="0.3 0.23 0.17 {0 if layout.scene else 1}"/>' for sx in (-1, 1) for sy in (-1, 1))}
-    {sheet}
-    {"".join(zones)}
     {"".join(scenery)}
     {"".join(props)}
-    {"".join(objs)}
     <body name="hand" mocap="true" pos="{_f(*HOME)}">
       <geom type="box" pos="0 0 0.042" size="0.056 0.016 0.009" rgba="0.18 0.19 0.22 1" contype="0" conaffinity="0"/>
       <geom type="cylinder" pos="0 0 0.16" size="0.014 0.11" rgba="0.30 0.32 0.36 1" contype="0" conaffinity="0"/>

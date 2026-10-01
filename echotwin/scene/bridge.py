@@ -92,10 +92,7 @@ def sonar_objects_to_twin_doc(sonar_data: dict, cloud_path: Path | None = None, 
         "version": 1,
         "name": name,
         "sim_scale": sim_scale,
-        "show_zones": False,
         "objects": twin_objects,
-        "blocks": [],
-        "zones": [],
         "scene": []
     }
 

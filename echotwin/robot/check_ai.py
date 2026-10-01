@@ -17,7 +17,7 @@ async def main():
     if not b.enabled:
         return
     t = time.time()
-    print("intent ->", await b.parse_intent("could you shove the crimson cube over onto that tray thing"),
+    print("intent ->", await b.parse_everyday("could you shove the glass over beside the chocolate", ["glass", "chocolate bar"]),
           f"({time.time() - t:.1f}s)")
     img = np.full((480, 640, 3), 235, np.uint8)
     cv2.rectangle(img, (100, 300), (150, 350), (40, 40, 220), -1)
