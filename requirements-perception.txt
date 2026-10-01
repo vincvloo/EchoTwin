@@ -1,0 +1,14 @@
+# GPU environment: reconstruction (VGGT), detection (YOLO), maps, sonar localization, perception web app.
+# Install torch for your CUDA first (https://pytorch.org), then:
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+trimesh>=4.0
+imageio>=2.30
+imageio-ffmpeg
+pyyaml>=6.0
+pillow>=10.0
+ultralytics>=8.3
+pytest
+# VGGT is not vendored. Install it at a pinned commit:
+#   pip install git+https://github.com/facebookresearch/vggt.git@<commit>
