@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#101418">
+<title>Pip Controller</title>
+<style>
+:root{--bg:#101418;--card:#1a2027;--line:#2a323c;--text:#e8edf2;--dim:#8b97a5;--accent:#38d39f;--warn:#ffb547;--stop:#ff4d4f;--blue:#4c8dff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+header{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--stop);flex:none}
+.dot.on{background:var(--accent)}
+#status{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#said{margin:0 16px 10px;padding:10px 12px;background:var(--card);border-radius:12px;min-height:44px;color:var(--text)}
+#said b{color:var(--accent)}
+nav{display:flex;margin:0 16px;background:var(--card);border-radius:12px;padding:4px}
+nav button{flex:1;background:none;border:0;color:var(--dim);font:600 15px system-ui;padding:10px 0;border-radius:9px}
+nav button.on{background:var(--line);color:var(--text)}
+section{display:none;padding:14px 16px 150px}
+section.on{display:block}
+.row{display:flex;gap:10px;margin-bottom:10px}
+.btn{flex:1;border:0;border-radius:14px;padding:16px 8px;font:600 16px system-ui;color:var(--text);background:var(--card);border:1px solid var(--line)}
+.btn:active,.btn.act{background:var(--line)}
+.btn.primary{background:var(--accent);color:#06281c;border:0}
+.btn.blue{background:var(--blue);border:0}
+.btn.warn{background:var(--warn);color:#2b1a00;border:0}
+#pad{position:relative;height:260px;border-radius:18px;background:radial-gradient(circle at 50% 50%,#22303b,#161c22 70%);border:1px solid var(--line);touch-action:none;margin-bottom:10px;overflow:hidden}
+#pad .hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--dim);padding:20px;pointer-events:none}
+#knob{position:absolute;width:58px;height:58px;border-radius:50%;background:var(--accent);opacity:.9;left:calc(50% - 29px);top:calc(50% - 29px);box-shadow:0 0 0 6px #38d39f33;pointer-events:none;transition:opacity .2s}
+#pad.idle #knob{opacity:.25}
+.toggle{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--card);border-radius:12px;margin-bottom:8px;border:1px solid var(--line)}
+.toggle input{width:22px;height:22px}
+#review{display:none}
+#review.on{display:flex}
+#stop{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));height:78px;border:0;border-radius:20px;background:var(--stop);color:white;font:800 26px system-ui;letter-spacing:2px;box-shadow:0 8px 30px #ff4d4f55;z-index:5}
+#stop.halted{background:#7a1f22}
+#mic{width:100%;height:120px;border-radius:20px;border:0;background:var(--blue);color:white;font:700 20px system-ui;margin-bottom:12px;touch-action:none}
+#mic.rec{background:var(--stop)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.chip{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:9px 13px;font:14px system-ui}
+input[type=text]{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:14px;font:16px system-ui}
+video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:cover;display:block;margin-bottom:10px}
+.small{color:var(--dim);font-size:13px;margin:6px 2px 12px}
+#bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:-4px 0 10px}
+#bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+#motionBtn{display:none}
+</style>
+</head>
+<body>
+<header><div class="dot" id="dot"></div><div id="status">Connecting…</div></header>
+<div id="said">Say or type what Pip should do.</div>
+<nav>
+  <button data-tab="drive" class="on">Drive</button>
+  <button data-tab="talk">Talk</button>
+  <button data-tab="scan">Scan</button>
+</nav>
+
+<section id="drive" class="on">
+  <button class="btn warn" id="motionBtn" style="width:100%;margin-bottom:10px">Enable tilt &amp; shake</button>
+  <div id="pad" class="idle"><div class="hint" id="padHint">Hold and tilt the phone to move.<br>Or drag like a joystick.</div><div id="knob"></div></div>
+  <div class="row">
+    <button class="btn" id="up">▲ Up</button>
+    <button class="btn" id="down">▼ Down</button>
+    <button class="btn primary" id="grip">Grip</button>
+  </div>
+  <div class="row" id="review">
+    <button class="btn primary" data-btn="keep">Keep demo</button>
+    <button class="btn" data-btn="discard">Discard</button>
+  </div>
+  <div class="row">
+    <button class="btn blue" data-btn="robot_turn">Your turn</button>
+    <button class="btn" data-btn="human_turn">My turn</button>
+    <button class="btn" data-btn="continue">Continue</button>
+  </div>
+  <label class="toggle"><span>Shake to stop</span><input type="checkbox" id="shakeOn" checked></label>
+</section>
+
+<section id="talk">
+  <button id="mic">Hold to talk</button>
+  <div class="row"><input type="text" id="txt" placeholder="Put the red block in the green zone" enterkeyhint="send"><button class="btn primary" style="flex:none;width:80px" id="send">Send</button></div>
+  <div class="chips" id="chips"></div>
+  <p class="small" id="micNote"></p>
+</section>
+
+<section id="scan">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="bar"><i id="barFill"></i></div>
+  <div class="row"><button class="btn primary" id="sweep">Sweep scan (6 s)</button></div>
+  <div class="row">
+    <button class="btn" id="addPhoto">Add photo</button>
+    <button class="btn" id="finish" disabled>Finish (0)</button>
+  </div>
+  <div class="row"><button class="btn" id="snap">One photo (works with everyday objects)</button></div>
+  <p class="small">Keep the whole white A4 sheet in view. Walk slowly halfway round the table.</p>
+  <div class="row"><button class="btn blue" id="demoRec">● Record a demo with your hand</button></div>
+  <p class="small">Hold the phone still above the table (sheet in view), tap record, move one block into a zone with your hand, tap stop. Pip learns from it.</p>
+</section>
+
+<button id="stop">STOP</button>
+
+<script>
+const $ = s => document.querySelector(s);
+let ws, connected = false, state = {};
+const buzz = p => { try { navigator.vibrate && navigator.vibrate(p) } catch (e) {} };
+let lastButton = 0;
+
+function connect() {
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?role=phone`);
+  ws.onopen = () => { connected = true; $('#dot').classList.add('on'); };
+  ws.onclose = () => { connected = false; $('#dot').classList.remove('on'); $('#status').textContent = 'Reconnecting…'; setTimeout(connect, 1000); };
+  ws.onmessage = e => onMsg(JSON.parse(e.data));
+}
+function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function onMsg(m) {
+  if (m.t === 'state') { state = m; renderState(); renderChips(m.props); }
+  else if (m.t === 'say') { $('#said').innerHTML = `<b>${state.name || 'Pip'}:</b> ` + esc(m.text); }
+  else if (m.t === 'haptic') buzz(m.pattern);
+  else if (m.t === 'hello' && m.flags && !m.flags.shake) { $('#shakeOn').checked = false; }
+  else if (m.t === 'scan' && m.stage === 'done') { $('#said').textContent = 'Scan done. Look at the dashboard.'; }
+}
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function renderState() {
+  const s = state;
+  let txt = s.halted ? `STOPPED (${s.halt_reason})` :
+    s.mode === 'teach' ? `Teaching: ${s.task?.instruction || ''}` :
+    s.mode === 'auto' ? `Pip is working${s.plan ? ' · ' + s.plan.sure + '% sure' : ''}` :
+    s.mode === 'correct' ? 'Your turn: correcting Pip' :
+    s.mode === 'review' ? `Demo scored ${s.review?.score}. Keep it?` :
+    s.mode === 'replay' ? 'Pip is replaying your video' :
+    s.pending ? s.pending : (s.authority === 'robot' ? 'Pip has control' : 'You have control');
+  if (s.mode === 'teach' && s.recording) txt = '● REC  ' + txt;
+  $('#status').textContent = txt;
+  $('#stop').classList.toggle('halted', !!s.halted);
+  $('#stop').textContent = s.halted ? 'STOPPED · tap Continue' : 'STOP';
+  $('#review').classList.toggle('on', s.mode === 'review');
+  $('#grip').textContent = s.grip ? 'Release' : 'Grip';
+  gripOn = !!s.grip;
+}
+
+// tabs
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('section').forEach(x => x.classList.toggle('on', x.id === b.dataset.tab));
+  if (b.dataset.tab === 'scan') startCamera();
+});
+
+// ---------- drive ----------
+let tilt = null, tilt0 = null, driving = false, padVec = null, vz = 0, gripOn = false;
+const pad = $('#pad'), knob = $('#knob');
+function clamp(v) { return Math.max(-1, Math.min(1, v)); }
+function dead(v, d) { return Math.abs(v) < d ? 0 : (v - Math.sign(v) * d); }
+window.addEventListener('deviceorientation', e => { if (e.beta != null) tilt = { b: e.beta, g: e.gamma }; });
+function padPos(e) {
+  const r = pad.getBoundingClientRect(), t = e.touches ? e.touches[0] : e;
+  const R = Math.min(r.width, r.height) / 2 - 20;
+  let dx = (t.clientX - r.left - r.width / 2) / R, dy = (t.clientY - r.top - r.height / 2) / R;
+  return { dx: clamp(dx), dy: clamp(dy) };
+}
+let startPos = null;
+function padStart(e) { e.preventDefault(); driving = true; tilt0 = tilt ? { ...tilt } : null; startPos = padPos(e); padVec = null; pad.classList.remove('idle'); buzz(15); }
+function padMove(e) { if (!driving) return; e.preventDefault(); const p = padPos(e); if (Math.hypot(p.dx - startPos.dx, p.dy - startPos.dy) > 0.12) padVec = { dx: p.dx - startPos.dx, dy: p.dy - startPos.dy }; }
+function padEnd() { driving = false; padVec = null; pad.classList.add('idle'); knob.style.transform = ''; send({ t: 'ctl', vx: 0, vy: 0, vz }); }
+pad.addEventListener('touchstart', padStart, { passive: false }); pad.addEventListener('touchmove', padMove, { passive: false });
+pad.addEventListener('touchend', padEnd); pad.addEventListener('touchcancel', padEnd);
+pad.addEventListener('mousedown', padStart); window.addEventListener('mousemove', padMove); window.addEventListener('mouseup', () => driving && padEnd());
+
+function hold(el, v) {
+  const on = e => { e.preventDefault(); vz = v; el.classList.add('act'); lastButton = Date.now(); };
+  const off = () => { vz = 0; el.classList.remove('act'); };
+  el.addEventListener('touchstart', on, { passive: false }); el.addEventListener('touchend', off); el.addEventListener('touchcancel', off);
+  el.addEventListener('mousedown', on); el.addEventListener('mouseup', off); el.addEventListener('mouseleave', off);
+}
+hold($('#up'), 0.8); hold($('#down'), -0.8);
+$('#grip').onclick = () => { lastButton = Date.now(); gripOn = !gripOn; send({ t: 'grip', on: gripOn }); buzz(gripOn ? [30, 30, 30] : 30); $('#grip').textContent = gripOn ? 'Release' : 'Grip'; };
+document.querySelectorAll('[data-btn]').forEach(b => b.onclick = () => { lastButton = Date.now(); send({ t: 'btn', name: b.dataset.btn }); buzz(20); });
+$('#stop').onclick = () => { if (state.halted) { send({ t: 'btn', name: 'continue' }); } else { send({ t: 'stop', reason: 'button' }); } buzz([200]); };
+
+setInterval(() => {
+  let vx = 0, vy = 0;
+  if (driving) {
+    if (padVec) { vx = padVec.dx; vy = -padVec.dy; }
+    else if (tilt && tilt0) { vx = clamp(dead(tilt.g - tilt0.g, 4) / 22); vy = clamp(-dead(tilt.b - tilt0.b, 4) / 22); }
+    knob.style.transform = `translate(${vx * 80}px, ${-vy * 80}px)`;
+  }
+  if (driving || vz) send({ t: 'ctl', vx, vy, vz });
+}, 50);
+
+// motion permission (iOS)
+const needPerm = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
+if (needPerm) $('#motionBtn').style.display = 'block';
+$('#motionBtn').onclick = async () => {
+  try {
+    await DeviceOrientationEvent.requestPermission();
+    if (DeviceMotionEvent.requestPermission) await DeviceMotionEvent.requestPermission();
+    $('#motionBtn').style.display = 'none';
+  } catch (e) { $('#motionBtn').textContent = 'Motion blocked: use the joystick'; }
+};
+
+// ---------- F5 shake to stop ----------
+let peaks = [];
+window.addEventListener('devicemotion', e => {
+  if (!$('#shakeOn').checked || Date.now() - lastButton < 1000 || state.halted) return;
+  const a = e.acceleration && e.acceleration.x != null ? e.acceleration : null;
+  const g = e.accelerationIncludingGravity;
+  let mag;
+  if (a) mag = Math.hypot(a.x, a.y, a.z) + 9.81; else if (g) mag = Math.hypot(g.x, g.y, g.z); else return;
+  const now = Date.now();
+  if (mag > 25) {
+    if (!peaks.length || now - peaks[peaks.length - 1] > 90) peaks.push(now);
+    peaks = peaks.filter(t => now - t < 500);
+    if (peaks.length >= 2) { peaks = []; send({ t: 'stop', reason: 'shake' }); buzz([500]); }
+  }
+});
+
+// ---------- talk ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, heard = '';
+if (!SR) $('#micNote').textContent = 'Speech recognition is not available in this browser. Type instead.';
+function say(text) { if (text.trim()) { send({ t: 'say', text }); $('#said').textContent = '“' + text + '”'; } }
+function micStart(e) {
+  e.preventDefault(); if (!SR) return;
+  heard = ''; rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true;
+  rec.onresult = ev => {
+    heard = Array.from(ev.results).map(r => r[0].transcript).join(' ');
+    $('#said').textContent = '… ' + heard;
+    // the stop word never waits for the end of the sentence
+    if (/\b(stop|halt|freeze)\b/i.test(heard) && !state.halted) { send({ t: 'say', text: 'stop' }); heard = ''; try { rec.stop() } catch (e) {} }
+  };
+  rec.onerror = ev => { $('#micNote').textContent = 'Mic: ' + ev.error; };
+  try { rec.start(); $('#mic').classList.add('rec'); $('#mic').textContent = 'Listening… release to send'; buzz(20); } catch (e) {}
+}
+function micEnd() {
+  if (!rec) return;
+  $('#mic').classList.remove('rec'); $('#mic').textContent = 'Hold to talk';
+  const r = rec; rec = null;
+  setTimeout(() => { try { r.stop() } catch (e) {} ; if (heard) say(heard); heard = ''; }, 350);
+}
+$('#mic').addEventListener('touchstart', micStart, { passive: false }); $('#mic').addEventListener('touchend', micEnd);
+$('#mic').addEventListener('mousedown', micStart); $('#mic').addEventListener('mouseup', micEnd);
+$('#send').onclick = () => { say($('#txt').value); $('#txt').value = ''; };
+$('#txt').addEventListener('keydown', e => { if (e.key === 'Enter') $('#send').click(); });
+let chipKey = null;
+function renderChips(props) {
+  const names = (props || []).map(p => p.name);
+  const key = names.join('|');
+  if (key === chipKey) return;
+  chipKey = key;
+  const first = names.length
+    ? [`Put the ${names[0]} next to the ${names[1] || names[0]}`, names[1] ? `Move the ${names[1]} to the left` : 'Move it to the left']
+    : ['Put the red block in the green zone', 'Put the blue block in the blue tray'];
+  $('#chips').innerHTML = '';
+  [...first, 'What do you see?', 'How sure are you?', 'Why did you stop?', 'Continue'].forEach(c => {
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = c; b.onclick = () => say(c); $('#chips').appendChild(b);
+  });
+}
+renderChips([]);
+
+// ---------- F3 camera + F0 scan ----------
+let stream = null, photos = 0;
+async function startCamera() {
+  if (stream) return;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+    $('#video').srcObject = stream;
+  } catch (e) { $('#said').textContent = 'Camera not available (' + e.name + '). Driving and talking still work.'; }
+}
+function grab() {
+  const v = $('#video'); if (!v.videoWidth) return null;
+  const s = 1024 / Math.max(v.videoWidth, v.videoHeight);
+  const c = document.createElement('canvas'); c.width = Math.round(v.videoWidth * Math.min(1, s)); c.height = Math.round(v.videoHeight * Math.min(1, s));
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.8);
+}
+$('#sweep').onclick = async () => {
+  await startCamera(); if (!stream) return;
+  send({ t: 'scan_begin', mode: 'sweep' }); buzz(40);
+  const btn = $('#sweep'); btn.disabled = true; let n = 0; const N = 24;
+  const iv = setInterval(() => {
+    const img = grab(); if (img) send({ t: 'frame', img, beta: tilt?.b });
+    n++; $('#barFill').style.width = (100 * n / N) + '%'; btn.textContent = `Scanning… ${Math.ceil((N - n) / 4)} s`;
+    if (n >= N) { clearInterval(iv); send({ t: 'scan_end' }); buzz([40, 40, 40]); btn.disabled = false; btn.textContent = 'Sweep scan (6 s)'; setTimeout(() => $('#barFill').style.width = '0', 800); }
+  }, 250);
+};
+$('#addPhoto').onclick = async () => {
+  await startCamera(); const img = grab(); if (!img) return;
+  if (photos === 0) send({ t: 'scan_begin', mode: 'photos' });
+  send({ t: 'frame', img, beta: tilt?.b }); photos++; buzz(30);
+  $('#finish').disabled = false; $('#finish').textContent = `Finish (${photos})`;
+};
+$('#finish').onclick = () => { send({ t: 'scan_end' }); photos = 0; $('#finish').disabled = true; $('#finish').textContent = 'Finish (0)'; buzz([40, 40, 40]); };
+$('#snap').onclick = async () => { await startCamera(); const img = grab(); if (img) { send({ t: 'snap', img, beta: tilt?.b }); buzz(30); } };
+
+// ---------- learn from a video of your hand ----------
+let demoIv = null, demoN = 0;
+$('#demoRec').onclick = async () => {
+  if (demoIv) {  // stop
+    clearInterval(demoIv); demoIv = null;
+    send({ t: 'demo_end', fps: 5 }); buzz([40, 40, 40]);
+    $('#demoRec').textContent = '● Record a demo with your hand'; $('#demoRec').classList.add('blue'); $('#demoRec').classList.remove('warn');
+    $('#barFill').style.width = '0';
+    return;
+  }
+  await startCamera(); if (!stream) return;
+  send({ t: 'demo_begin' }); buzz(40); demoN = 0;
+  $('#demoRec').textContent = '■ Stop recording'; $('#demoRec').classList.remove('blue'); $('#demoRec').classList.add('warn');
+  demoIv = setInterval(() => {
+    const img = grab(); if (img) send({ t: 'frame', img, beta: tilt?.b });
+    demoN++; $('#barFill').style.width = Math.min(100, demoN / 1.5) + '%';
+    if (demoN >= 150) $('#demoRec').click();  // 30 s max
+  }, 200);
+};
+
+connect();
+</script>
+</body>
+</html>

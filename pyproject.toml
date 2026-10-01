@@ -1,0 +1,9 @@
+[project]
+name = "echotwin"
+version = "0.1.0"
+description = "Scan a place with a phone, find its objects, localize with sonar, and let a robot learn to move them."
+requires-python = ">=3.11,<3.15"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

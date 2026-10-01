@@ -1,0 +1,14 @@
+# Robot environment (Python 3.12): MuJoCo simulation, dashboard/phone server, twin import.
+mujoco>=3.2
+numpy
+opencv-python-headless
+fastapi
+uvicorn[standard]
+httpx
+python-dotenv
+cryptography
+pillow
+python-multipart
+trimesh
+scipy
+pytest
