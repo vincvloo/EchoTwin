@@ -16,3 +16,19 @@ One run goes through eight steps. Each step hands one file to the next.
 
 The review needs `AI_API_KEY` in `.env` (see `THIRD_PARTY.md`: photos are sent to NVIDIA). Without a key the detector's names are kept.
 All capture alternatives are compared in `APPROACHES.md`.
+
+## From the phone
+
+A sweep scan on the phone runs steps 2 to 7b by itself (`robot/twin_import/pipeline.py`, command list in
+`perception/pipeline.py`) and shows progress with a **Skip, use quick mode** button. About 2 minutes for 10
+photos on an RTX 2050 (reconstruction 90 s, detection 20 s). Quick mode (`twin_import/photos.py`, one photo,
+no GPU) takes over when you skip, when `PERCEPTION_PY` is not set, with fewer than 3 photos, when a step
+fails, or when the 3D scene has nothing small enough to move.
+
+Settings in `.env`, all paths relative to the repository or absolute: `PERCEPTION_PY`, `PERCEPTION_MAPS_PY`
+(if the GPU environment has no scipy), `VGGT_PATH` (default `third_party/vggt`), `SCAN_MODE`
+(`auto` | `quick` | `3d`), `SCAN_FRAMES`, `SCAN_CAM_HEIGHT`.
+
+Known limits: the scale comes from the phone height (`SCAN_CAM_HEIGHT`), so absolute sizes can be off by a
+factor; the twin is scaled to the sim table anyway. The table texture (photo of the table) is not built in 3D
+mode yet.

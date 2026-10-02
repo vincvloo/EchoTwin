@@ -318,7 +318,7 @@ def _new_dir(prefix: str = "") -> tuple[str, pathlib.Path]:
     return sid, out
 
 
-def twin_ctx() -> "TI.TwinContext":
+def twin_ctx(skip: asyncio.Event | None = None) -> "TI.TwinContext":
     async def ask(jpeg: bytes, prompt: str):
         emit({"t": "thinking", "on": True})
         try:
@@ -332,7 +332,8 @@ def twin_ctx() -> "TI.TwinContext":
         say=lambda text: sim.submit(sim.say, text),
         progress=lambda stage, data: emit({"t": "scan", "stage": stage, **data}),
         new_dir=_new_dir,
-        ask_ai_json=ask if brain.enabled else None)
+        ask_ai_json=ask if brain.enabled else None,
+        skip=skip)
 
 
 async def process_everyday(frames: list[bytes], pitches: list):
@@ -440,11 +441,12 @@ async def process_scan(frames: list[bytes], pitches: list | None = None):
     if scan_buf["busy"]:
         return
     scan_buf["busy"] = True
+    scan_buf["skip"] = skip = asyncio.Event()      # "skip, use quick mode" from the phone or dashboard
     try:
         if frames:
             latest_photo["jpeg"] = frames[len(frames) // 2]
             latest_photo["t"] = time.time()
-        await TI.photo_importer()(frames, pitches or [], twin_ctx())
+        await TI.photo_importer()(frames, pitches or [], twin_ctx(skip))
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -452,6 +454,7 @@ async def process_scan(frames: list[bytes], pitches: list | None = None):
         sim.submit(sim.say, "The scan failed. Please try again.")
     finally:
         scan_buf["busy"] = False
+        scan_buf["skip"] = None
 
 
 def _pitch(m: dict):
@@ -512,6 +515,9 @@ async def on_message(m: dict, role: str):
             sim.submit(sim.reset_scene)
         else:
             sim.submit(sim.handle_intent, Intent("control", name))
+    elif t == "scan_skip":
+        if scan_buf.get("skip") is not None:
+            scan_buf["skip"].set()
     elif t == "scan_begin":
         scan_buf["frames"], scan_buf["mode"], scan_buf["pitches"] = [], m.get("mode", "sweep"), []
         emit({"t": "scan", "stage": "capturing", "mode": scan_buf["mode"]})

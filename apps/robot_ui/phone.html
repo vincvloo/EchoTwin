@@ -46,6 +46,9 @@ video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:
 #bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:-4px 0 10px}
 #bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 #motionBtn{display:none}
+#pipe{display:none;margin:0 0 12px}
+#pipeBar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:6px 0}
+#pipeFill{display:block;height:100%;width:0;background:var(--accent);transition:width .6s}
 </style>
 </head>
 <body>
@@ -85,6 +88,8 @@ video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:
 </section>
 
 <section id="scan">
+  <div id="pipe"><div id="pipeBar"><i id="pipeFill"></i></div><p class="small" id="pipeText"></p>
+    <button class="btn" id="pipeSkip">Skip, use quick mode</button></div>
   <video id="video" playsinline muted autoplay></video>
   <div id="bar"><i id="barFill"></i></div>
   <div class="row"><button class="btn primary" id="sweep">Sweep scan (6 s)</button></div>
@@ -92,8 +97,8 @@ video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:
     <button class="btn" id="addPhoto">Add photo</button>
     <button class="btn" id="finish" disabled>Finish (0)</button>
   </div>
-  <div class="row"><button class="btn" id="snap">One photo (works with everyday objects)</button></div>
-  <p class="small">Keep the whole table surface in view and hold the phone steady.</p>
+  <div class="row"><button class="btn" id="snap">One photo (quick mode)</button></div>
+  <p class="small">Sweep scan builds a 3D model (a few minutes, you can skip). Keep the whole table in view and hold the phone steady.</p>
   <div class="row"><button class="btn blue" id="demoRec">● Record a demo with your hand</button></div>
   <p class="small">Hold the phone still with the whole table in view, tap record, move one object with your hand, keep filming 2 seconds, tap stop. Pip learns from it.</p>
 </section>
@@ -118,8 +123,16 @@ function onMsg(m) {
   else if (m.t === 'say') { $('#said').innerHTML = `<b>${state.name || 'Pip'}:</b> ` + esc(m.text); }
   else if (m.t === 'haptic') buzz(m.pattern);
   else if (m.t === 'hello' && m.flags && !m.flags.shake) { $('#shakeOn').checked = false; }
+  else if (m.t === 'scan' && m.stage === 'pipeline') onPipeline(m);
   else if (m.t === 'scan' && m.stage === 'done') { $('#said').textContent = 'Scan done. Look at the dashboard.'; }
 }
+function onPipeline(m) {
+  const running = m.state === 'running';
+  $('#pipe').style.display = running ? 'block' : 'none';
+  $('#pipeFill').style.width = m.pct + '%';
+  if (running) $('#pipeText').textContent = `Step ${m.i + 1} of ${m.steps.length}: ${m.steps[m.i]} · ${m.elapsed} s · about ${m.pct}%`;
+}
+$('#pipeSkip').onclick = () => send({ t: 'scan_skip' });
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 function renderState() {
   const s = state;

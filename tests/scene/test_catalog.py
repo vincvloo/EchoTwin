@@ -7,7 +7,7 @@ from echotwin.scene import catalog
 def test_all_80_coco_classes_are_covered():
     assert len(catalog.COCO_CLASSES) == 80
     for name in catalog.COCO_CLASSES:
-        info = catalog.classify(name, 0.1, 0.1, 0.1)
+        info = catalog.classify(name, 0.5, 0.5, 0.5)       # big enough that no name is overruled by its size
         assert info["known"] and info["shape"] in catalog.SHAPES
 
 
@@ -39,3 +39,11 @@ def test_unknown_names_get_a_geometry_guess():
     assert catalog.classify("chocolate bar", 0.1, 0.05, 0.01)["shape"] == "flat"
     assert catalog.classify("oil can", 0.08, 0.08, 0.2)["shape"] == "cylinder"
     assert not catalog.classify("wardrobe", 1.0, 0.6, 2.0)["movable"]
+
+
+def test_a_tiny_dining_table_is_a_small_object_not_a_table():
+    small = catalog.classify("dining table", 0.11, 0.06, 0.06)
+    assert small["movable"] and not small["surface"] and small["label"] == "object" and small["shape"] == "box"
+    assert catalog.classify("dining table", 0.07, 0.06, 0.02)["shape"] == "flat"
+    big = catalog.classify("dining table", 0.83, 1.11, 0.23)
+    assert big["surface"] and not big["movable"] and "label" not in big

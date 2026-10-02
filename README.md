@@ -22,22 +22,37 @@ Details: [docs/PIPELINE.md](docs/PIPELINE.md). Other capture methods and why pho
 
 ## Setup
 
-Two Python environments (the GPU stack and the simulator do not need to share one).
+Two Python environments (the GPU stack and the simulator do not need to share one). Every path below and in
+`.env` is relative to the repository, so the same setup works on any machine.
 
 ```powershell
-# Perception: maps, detection, sonar localization, perception web app (GPU optional for maps)
-pip install -r requirements-perception.txt        # install torch for your CUDA first
-pip install git+https://github.com/facebookresearch/vggt.git     # pin a commit
+# Perception: reconstruction, detection, maps, sonar localization, perception web app
+python -m venv .venv-perception
+.venv-perception\Scripts\pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # your CUDA
+.venv-perception\Scripts\pip install -r requirements-perception.txt
+
+# VGGT (Meta): clone it into third_party/ (git-ignored). Pin a commit you have checked.
+git clone https://github.com/facebookresearch/vggt third_party/vggt
+.venv-perception\Scripts\pip install -r third_party/vggt/requirements.txt
 
 # Robot: MuJoCo twin, dashboard, phone page
 uv venv --python 3.12 .venv-robot
 uv pip install --python .venv-robot -r requirements-robot.txt
 
-copy .env.example .env      # set PERCEPTION_PY and ROBOT_PY; AI keys are optional
+copy .env.example .env      # then set PERCEPTION_PY and ROBOT_PY (relative paths are fine)
 ```
 
-Everything runs offline without API keys. `AI_API_KEY` (NVIDIA) adds object naming and phrasing;
-`ELEVENLABS_API_KEY` adds a voice.
+On Linux or macOS use `bin/python` instead of `Scripts\python.exe`.
+
+Everything runs offline without API keys. `AI_API_KEY` (NVIDIA) adds object naming, phrasing and the review
+of detections; `ELEVENLABS_API_KEY` adds a voice.
+
+### Phone scan: 3D or quick
+
+With `PERCEPTION_PY` set, a sweep scan from the phone builds a 3D model of the table (VGGT, YOLO, optional review).
+It takes a few minutes on a laptop GPU; the dashboard and the phone show progress and a **Skip, use quick mode**
+button. Without `PERCEPTION_PY`, with fewer than 3 photos, or if a step fails, the quick one-photo method runs
+instead. Set `SCAN_MODE=quick` to always use it.
 
 ## Run
 

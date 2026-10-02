@@ -33,7 +33,7 @@ def build_scene(objects: list[dict], map_meta: dict | None = None, name: str = "
         h = o.get("height")
         info = catalog.classify(cls, sx, sy, h)
         out.append({
-            "id": f"o{i + 1}", "class": cls, "label": o.get("label") or cls, "source": o.get("source", source),
+            "id": f"o{i + 1}", "class": cls, "label": o.get("label") or info.get("label") or cls, "source": o.get("source", source),
             "conf": o.get("conf"), "x": float(o["x"]), "y": float(o["y"]), "size_x": sx, "size_y": sy,
             "height": None if h is None else float(h), "base_z": float(o.get("base_z", 0.0)),
             "shape": info["shape"], "movable": info["movable"], "surface": info["surface"], "on": None,
