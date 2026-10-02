@@ -25,17 +25,23 @@ from echotwin.perception.mapping import (UP, add_scale_args, align_walls, level_
                                    points_to_grid, resolve_scale)
 
 
-def find_objects(pts, cls, frame, gmap, names, min_pts=5, min_views=2, min_area=0.02, max_z=1.5):
+def find_objects(pts, cls, frame, gmap, names, min_pts=5, min_views=2, min_area=0.02, max_z=1.5, pixels=None):
     """Group labelled points into objects on the map grid.
 
     A cell belongs to the class with most points in it (points between 2 cm and `max_z` above the
     floor), if that class has >= min_pts points there from >= min_views photos. Connected cells of
     one class form an object.
+
+    `pixels` = (row, col, (H, W)): where each point sits in its photo (model-size pixels). Then every object
+    also gets "views": up to MAX_VIEWS photos that see it best, with its box in that photo as fractions
+    (x0, y0, x1, y1) of the image, so a reviewer can look at the right place.
     """
     ok = (cls >= 0) & (pts[:, 2] > 0.02) & (pts[:, 2] < max_z)
     r, c = gmap.to_cell(pts[ok, 0], pts[ok, 1])
     inside = gmap.inside(r, c)
     r, c, k, f, z = r[inside], c[inside], cls[ok][inside], frame[ok][inside], pts[ok, 2][inside]
+    if pixels is not None:
+        pr, pc = pixels[0][ok][inside], pixels[1][ok][inside]
     classes = np.unique(k)
     votes = np.zeros((len(classes),) + gmap.occ.shape, np.int32)
     views = np.zeros_like(votes)
@@ -68,8 +74,28 @@ def find_objects(pts, cls, frame, gmap, names, min_pts=5, min_views=2, min_area=
             "points": int(in_obj.sum()),
             "merged": len(kks) - 1,
         })
+        if pixels is not None:
+            objects[-1]["views"] = object_views(f[in_obj], pr[in_obj], pc[in_obj], pixels[2])
         label_img[cells] = len(objects) - 1
     return objects, label_img
+
+
+MAX_VIEWS = 3
+
+
+def object_views(f, row, col, hw, max_views=MAX_VIEWS):
+    """Photos that see an object best: [{"frame", "box": [x0, y0, x1, y1] as fractions of the photo, "points"}]."""
+    H, W = hw
+    out = []
+    frames, counts = np.unique(f, return_counts=True)
+    for i in frames[np.argsort(-counts)][:max_views]:
+        m = f == i
+        x0, x1 = np.quantile(col[m], [0.03, 0.97])
+        y0, y1 = np.quantile(row[m], [0.03, 0.97])
+        out.append({"frame": int(i), "points": int(m.sum()),
+                    "box": [round(float(x0 / W), 3), round(float(y0 / H), 3),
+                            round(float((x1 + 1) / W), 3), round(float((y1 + 1) / H), 3)]})
+    return out
 
 
 def _bbox(cells):
@@ -164,7 +190,14 @@ def main(argv=None):
     pts, *_ = align_walls(pts)
     gmap = points_to_grid(pts, res=a.res, band=tuple(a.band))
     gmap.save(a.out)
-    objects, label_img = find_objects(pts, lab["cls"], lab["frame"], gmap, names, min_views=a.min_views)
+    pixels = None
+    pix_path = Path(a.cloud).with_suffix(".pix.npz")
+    if pix_path.exists():                                    # per-point photo pixels: lets the review find each object
+        pix = np.load(pix_path)
+        if len(pix["row"]) == len(pts):
+            pixels = (pix["row"].astype(int), pix["col"].astype(int), tuple(int(v) for v in pix["model_hw"]))
+    objects, label_img = find_objects(pts, lab["cls"], lab["frame"], gmap, names, min_views=a.min_views,
+                                      pixels=pixels)
     meta = {"origin": [round(gmap.origin[0], 4), round(gmap.origin[1], 4)], "res": gmap.res,
             "width": gmap.W, "height": gmap.H}                   # lets run_demo check it is the same map
     Path(f"{a.out}_objects.json").write_text(json.dumps({"map": meta, "objects": objects}, indent=1))

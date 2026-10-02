@@ -19,8 +19,10 @@ The one file that perception writes and the rest of EchoTwin reads. Metres, in t
 | Field | Meaning |
 |---|---|
 | `class` | Detector class name (any name; the 80 YOLO classes are in `catalog.py`) |
-| `label` | Name shown to people. Starts as `class`; the NVIDIA review (PR3) may rename it |
+| `label` | Name shown to people. Starts as `class`; the NVIDIA review may rename it |
 | `source` | Who named it: `yolo`, `nvidia` (reviewed), `quick` (one-photo importer), `manual` |
+| `traits` | From the review: `fragile`, `hollow`, `soft` (a trait needs two photos that agree) |
+| `views` | Up to 3 photos that see the object best: `{frame, box: [x0, y0, x1, y1] as fractions of the photo, points}` |
 | `x`, `y`, `size_x`, `size_y` | Footprint centre and size on the floor plan |
 | `height`, `base_z` | Top and bottom of the object above the floor. A cup on a table has `base_z` near the table height |
 | `shape` | `flat`, `box`, `cylinder` or `round`, from the catalog (the shapes the robot has skills for) |
