@@ -48,6 +48,13 @@ def pick_window(scene: dict) -> tuple[tuple[float, float], list[dict], dict | No
     return (sum(i["x"] for i in items) / len(items), sum(i["y"] for i in items) / len(items)), items, None
 
 
+def _holds(surface: dict, items: list[dict], margin: float = 0.05) -> bool:
+    """Does this surface lie under at least one of the things to move? (Then it is the table they stand on,
+    even when the detector did not link them.)"""
+    return any(abs(i["x"] - surface["x"]) <= surface["size_x"] / 2 + margin
+               and abs(i["y"] - surface["y"]) <= surface["size_y"] / 2 + margin for i in items)
+
+
 def _dist(a: dict, b: dict) -> float:
     return ((a["x"] - b["x"]) ** 2 + (a["y"] - b["y"]) ** 2) ** 0.5
 
@@ -73,8 +80,8 @@ def scene_to_twin(scene: dict, name: str | None = None) -> dict:
     sim_scale = TABLE_SIM[0] / real_w
     props, obstacles, left_out = [], [], 0
     for o in scene["objects"]:
-        if surface is not None and o["id"] == surface["id"]:
-            continue                                   # the table itself is the sim table
+        if o["surface"] and (o is surface or _holds(o, items)):
+            continue                                   # the table the objects stand on is the sim table
         dx, dy = o["x"] - cx, o["y"] - cy
         # something to move must be on the table; furniture only has to reach into the window
         reach_x = 0.0 if o["movable"] else o["size_x"] / 2
@@ -92,7 +99,7 @@ def scene_to_twin(scene: dict, name: str | None = None) -> dict:
                  "size_cm": [round(max(2.0, sx * 100), 1), round(max(2.0, sy * 100), 1),
                              round(max(1.0, h * 100), 1)],
                  "pos_cm": [round(dx * 100, 1), round(dy * 100, 1)], "yaw_deg": 0.0,
-                 "color": catalog.color_for(o["class"])}
+                 "color": catalog.color_for(o["id"] if o["label"] == "object" else o["class"])}
         if not o["movable"] and entry["shape"] == "cylinder":
             entry["shape"] = "box"                     # a clipped cylinder is not a cylinder any more
         (props if o["movable"] else obstacles).append(entry)

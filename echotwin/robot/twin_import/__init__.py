@@ -2,7 +2,8 @@
 
 Public API (the only things the server uses):
     TwinContext, ImportError_                       the contract (contract.py)
-    photo_importer()                                the active photo importer (default: photos.import_photos)
+    photo_importer()                                the active photo importer (default: pipeline.import_photos_auto,
+                                                    3D with a way out to photos.import_photos)
     layout_to_doc / doc_to_layout / export_zip / read_upload    twin files (layout_file.py)
     convert_mesh                                    3D scan -> mesh (meshes.py)
 """
@@ -21,8 +22,8 @@ def photo_importer():
     if spec:
         mod, _, fn = spec.partition(":")
         return getattr(importlib.import_module(mod), fn)
-    from .photos import import_photos
-    return import_photos
+    from .pipeline import import_photos_auto
+    return import_photos_auto
 
 
 __all__ = ["TwinContext", "ImportError_", "photo_importer", "layout_to_doc", "doc_to_layout", "export_zip",

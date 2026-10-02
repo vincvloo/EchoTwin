@@ -56,6 +56,10 @@ button.stop{background:var(--stop);border:0;color:white}
 #thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;align-content:start}
 #thumbs img{width:100%;border-radius:6px;aspect-ratio:4/3;object-fit:cover}
 #scanStatus{color:var(--dim);margin:0 0 8px}
+#pipe{display:none;margin:0 0 12px}
+#pipeBar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:6px 0}
+#pipeFill{display:block;height:100%;width:0;background:var(--accent);transition:width .6s}
+#pipeText{color:var(--dim);font-size:13px;margin:0 0 8px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left}
 th{color:var(--dim);font-weight:500}
@@ -177,6 +181,8 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
   <div class="card">
     <h2>Scan → digital twin</h2>
     <p id="scanStatus">No scan yet. On the phone: Scan → Sweep scan, and walk slowly round the table.</p>
+    <div id="pipe"><div id="pipeBar"><i id="pipeFill"></i></div><p id="pipeText"></p>
+      <button id="pipeSkip">Skip, use quick mode</button></div>
     <div id="twinRow"><img id="twin" alt=""><div id="thumbs"></div></div>
     <table id="dets" style="margin-top:10px"></table>
   </div>
@@ -312,9 +318,28 @@ function onScan(m) {
   if (m.stage === 'processing') st.textContent = `Processing ${m.frames} frames…`;
   if (m.stage === 'done') { renderScan(m.summary); setTimeout(loadTwin, 800); }
   if (m.stage === 'error') st.textContent = 'Scan failed: ' + m.error;
+  if (m.stage === 'pipeline') onPipeline(m);
   if (m.stage === 'everyday') st.textContent = 'Mapping everyday objects from the sharpest photo…';
 }
+function onPipeline(m) {
+  const box = $('#pipe'), running = m.state === 'running';
+  box.style.display = running ? 'block' : 'none';
+  $('#pipeFill').style.width = m.pct + '%';
+  if (running) {
+    $('#pipeText').textContent = `Step ${m.i + 1} of ${m.steps.length}: ${m.steps[m.i]} · ${m.elapsed} s · about ${m.pct}%`;
+    $('#scanStatus').textContent = 'Building a 3D model of the table. You can skip and use quick mode.';
+  } else if (m.state === 'skipped') $('#scanStatus').textContent = 'Skipped: using quick mode…';
+}
+$('#pipeSkip').onclick = () => send({ t: 'scan_skip' });
 function renderScan(s) {
+  if (s.mode === 'scan3d') {
+    $('#scanStatus').textContent = `3D model: ${s.props.length} object${s.props.length !== 1 ? 's' : ''} to move` +
+      `${s.obstacles.length ? ', ' + s.obstacles.length + ' fixed' : ''}${s.review && s.review.model ? ' · checked by ' + s.review.model : ''}.`;
+    $('#twin').src = s.twin + '?' + Date.now(); $('#thumbs').innerHTML = '';
+    $('#dets').innerHTML = '<tr><th>#</th><th>Object</th></tr>' + (s.props || []).map((n, i) => `<tr><td>${i + 1}</td><td>${esc(n)}</td></tr>`).join('') +
+      (s.obstacles || []).map(n => `<tr><td></td><td>${esc(n)} <span style="color:var(--dim)">(fixed)</span></td></tr>`).join('');
+    return;
+  }
   if (s.mode === 'file') {
     $('#scanStatus').textContent = `Twin "${s.name}" loaded from a file: ${s.props.length} objects${s.scene ? ', ' + s.scene + ' 3D scan(s)' : ''}.`;
     $('#thumbs').innerHTML = ''; $('#dets').innerHTML = '';

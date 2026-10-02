@@ -3,6 +3,7 @@ data/
 out/
 runs/
 models/
+third_party/
 certs/
 .env
 # environments and caches

@@ -11,6 +11,7 @@ through a TwinContext. It never touches the simulator, the server or the websock
 Plug your own photo importer in without touching this package:
     TWIN_PHOTO_IMPORTER=my_package.my_module:my_photo_importer     (in .env)
 """
+import asyncio  # noqa: F401  (type of TwinContext.skip)
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -32,6 +33,8 @@ class TwinContext:
     """-> (id, folder) for this import's files; the folder is served at /scans/<id>/."""
     ask_ai_json: Callable[[bytes, str], Awaitable[dict | None]] | None = None
     """Vision model: (jpeg, prompt) -> parsed JSON answer, or None when unavailable."""
+    skip: "asyncio.Event | None" = None
+    """Set by the user (button) to give up on a slow importer and use the quick one."""
     extra: dict = field(default_factory=dict)
 
 

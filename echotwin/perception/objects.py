@@ -178,6 +178,8 @@ def main(argv=None):
     ap.add_argument("--band", type=float, nargs=2, default=(0.05, 0.35))
     ap.add_argument("--floor-offset", type=float, default=0.0, metavar="H")
     ap.add_argument("--min-views", type=int, default=2, help="photos that must agree on a cell")
+    ap.add_argument("--min-area", type=float, default=0.02, metavar="M2",
+                    help="smallest object footprint in m2 (a tabletop needs about 0.0015)")
     add_scale_args(ap)
     a = ap.parse_args(argv)
     lab = np.load(Path(a.cloud).with_suffix(".labels.npz"))
@@ -197,7 +199,7 @@ def main(argv=None):
         if len(pix["row"]) == len(pts):
             pixels = (pix["row"].astype(int), pix["col"].astype(int), tuple(int(v) for v in pix["model_hw"]))
     objects, label_img = find_objects(pts, lab["cls"], lab["frame"], gmap, names, min_views=a.min_views,
-                                      pixels=pixels)
+                                      min_area=a.min_area, pixels=pixels)
     meta = {"origin": [round(gmap.origin[0], 4), round(gmap.origin[1], 4)], "res": gmap.res,
             "width": gmap.W, "height": gmap.H}                   # lets run_demo check it is the same map
     Path(f"{a.out}_objects.json").write_text(json.dumps({"map": meta, "objects": objects}, indent=1))

@@ -30,6 +30,8 @@ RUNS = ROOT / "runs"
 EXAMPLES_DIR = ROOT / "examples"
 PITCH = ROOT / "docs" / "pitch"
 PERCEPTION_PY = Path(os.environ.get("PERCEPTION_PY") or sys.executable)   # GPU env with torch, VGGT, ultralytics
+if not PERCEPTION_PY.is_absolute():
+    PERCEPTION_PY = ROOT / PERCEPTION_PY                                   # relative paths in .env are relative to the repo
 SCAN_EXT = {".ply", ".glb", ".gltf", ".obj"}
 IMG_EXT = {".jpg", ".jpeg", ".png"}
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".avi", ".webm"}

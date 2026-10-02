@@ -68,13 +68,21 @@ def normalize(name: str) -> str:
 
 
 def classify(name: str, size_x: float, size_y: float, height: float | None) -> dict:
-    """-> {"shape", "movable", "surface", "known"} for one detected object (sizes in metres)."""
+    """-> {"shape", "movable", "surface", "known"} for one detected object (sizes in metres).
+
+    "label" is added when the name does not fit the size and a plainer name is better ("object").
+    """
     n = normalize(name)
     h = float(height or 0.1)
     foot = max(float(size_x), float(size_y))
     small = foot <= MAX_MOVABLE_FOOTPRINT and h <= MAX_MOVABLE_HEIGHT
     if n in _ENTRIES:
         shape, movable, surface = _ENTRIES[n]
+        if surface and small:
+            # a "dining table" 11 x 6 cm is not a table: on a tabletop the detector often gives the same name
+            # to the table and to the small things on it. Size beats name.
+            return {"shape": _guess_shape("object", size_x, size_y, h), "movable": True, "surface": False,
+                    "known": False, "label": "object"}
         return {"shape": shape, "movable": bool(movable and small), "surface": surface, "known": True}
     return {"shape": _guess_shape(n, size_x, size_y, h), "movable": small, "surface": False, "known": False}
 

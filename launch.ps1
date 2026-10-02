@@ -11,8 +11,10 @@ if (Test-Path $envFile) {
         }
     }
 }
-$perceptionPy = if ($env:PERCEPTION_PY) { $env:PERCEPTION_PY } else { (Get-Command python).Source }
-$robotPy      = if ($env:ROBOT_PY) { $env:ROBOT_PY } else { Join-Path $root ".venv\Scripts\python.exe" }
+# Paths in .env may be relative to the repository
+function Resolve-Repo($p) { if ([System.IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $root $p } }
+$perceptionPy = if ($env:PERCEPTION_PY) { Resolve-Repo $env:PERCEPTION_PY } else { (Get-Command python).Source }
+$robotPy      = if ($env:ROBOT_PY) { Resolve-Repo $env:ROBOT_PY } else { Join-Path $root ".venv\Scripts\python.exe" }
 
 if (-not (Test-Path $robotPy)) {
     Write-Host "ROBOT_PY not found: $robotPy. Set ROBOT_PY in .env (see .env.example)." -ForegroundColor Red

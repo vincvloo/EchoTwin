@@ -70,3 +70,22 @@ def test_nothing_movable_is_an_error():
     scene = schema.build_scene([{"class": "chair", "x": 0, "y": 0, "size_x": 0.5, "size_y": 0.5, "height": 0.5}])
     with pytest.raises(to_twin.NoTable):
         to_twin.scene_to_twin(scene)
+
+
+# a real tabletop scan (examples/table_photos): the detector called the table AND the things on it "dining table"
+TABLETOP = [
+    {"class": "dining table", "x": 0.085, "y": 0.209, "size_x": 0.83, "size_y": 1.11, "height": 0.23, "base_z": 0.02},
+    {"class": "dining table", "x": 0.785, "y": 0.218, "size_x": 0.21, "size_y": 0.16, "height": 0.08, "base_z": 0.03},
+    {"class": "dining table", "x": 0.101, "y": -0.198, "size_x": 0.11, "size_y": 0.06, "height": 0.06, "base_z": 0.02},
+    {"class": "dining table", "x": 0.632, "y": 0.509, "size_x": 0.07, "size_y": 0.13, "height": 0.05, "base_z": 0.02},
+    {"class": "dining table", "x": 0.585, "y": 0.032, "size_x": 0.07, "size_y": 0.06, "height": 0.02, "base_z": 0.02},
+]
+
+
+def test_tabletop_scan_where_everything_is_called_table():
+    scene = schema.build_scene(TABLETOP, name="table")
+    assert [o["label"] for o in scene["objects"]] == ["dining table"] + ["object"] * 4
+    twin = to_twin.scene_to_twin(scene)
+    assert [o["name"] for o in twin["objects"]] == ["object 1", "object 2", "object 3", "object 4"]
+    assert twin["obstacles"] == []                        # the table is the sim table, not an obstacle on it
+    assert [o["shape"] for o in twin["objects"]][-1] == "flat"
