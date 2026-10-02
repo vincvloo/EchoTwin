@@ -132,7 +132,9 @@ def plan(job: dict) -> list[tuple[str, list[str]]]:
     if o.get("objects", "on") == "on":
         steps += [("Object detection (YOLO11)", [str(PERCEPTION_PY), "-m", "echotwin.perception.detect", str(cloud)]),
                   ("Object map", [py, "-m", "echotwin.perception.objects", str(cloud), "-o", str(d / "objects"), "--up", "y",
-                                  "--scale", "{scale}", "--floor-offset", fo])]
+                                  "--scale", "{scale}", "--floor-offset", fo]),
+                  ("Review of the objects (NVIDIA)", [py, "-m", "echotwin.perception.review", str(cloud),
+                                                      str(d / "objects_scene.json")])]
     run = [py, "-m", "echotwin.navigation.demo", "--scan", str(cloud), "--up", "y", "--scale", "{scale}", *common]
     if o.get("objects", "on") == "on":
         run += ["--objects", str(d / "objects_objects.json")]
@@ -168,7 +170,7 @@ def run_job(job: dict):
                 job["steps"][i]["state"] = "done"
                 keep = [l for l in p.stdout.splitlines()
                         if re.match(r"(quality|wall gaps|  [0-9.]+ m at|walls aligned|loaded|floor levelled|demo run"
-                                    r"|objects:|world:|\d+ frames|wrote|camera height|labelled|\s+\S+\s+at \()", l)]
+                                    r"|objects:|world:|\d+ frames|wrote|camera height|labelled|\s+\S+\s+at \(|reviewed|No AI_API_KEY|  renamed|  removed)", l)]
                 job["report"] += keep
         job["results"] = collect(job["dir"])
         job["state"] = "done"
@@ -213,7 +215,14 @@ def collect(d: Path) -> dict:
         out["detections"] = ["/runs/" + rel(f) for f in shots]
     if (d / "demo/summary.json").exists():
         out["summary"] = json.loads((d / "demo/summary.json").read_text())
-    if (d / "objects_objects.json").exists():
+    if (d / "objects_scene.json").exists():            # reviewed names when the review ran
+        scene = json.loads((d / "objects_scene.json").read_text())
+        out["objects"] = [{**o, "class": o.get("label") or o["class"]} for o in scene["objects"]]
+        out["review"] = scene.get("review")
+        shots = sorted((d / "objects_scene_review").glob("*.jpg"))
+        if shots:
+            out["review_photos"] = ["/runs/" + rel(f) for f in shots]
+    elif (d / "objects_objects.json").exists():
         out["objects"] = json.loads((d / "objects_objects.json").read_text())["objects"]
     return out
 

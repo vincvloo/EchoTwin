@@ -37,7 +37,8 @@ def build_scene(objects: list[dict], map_meta: dict | None = None, name: str = "
             "conf": o.get("conf"), "x": float(o["x"]), "y": float(o["y"]), "size_x": sx, "size_y": sy,
             "height": None if h is None else float(h), "base_z": float(o.get("base_z", 0.0)),
             "shape": info["shape"], "movable": info["movable"], "surface": info["surface"], "on": None,
-            "photos": o.get("photos"), "points": o.get("points"),
+            "traits": list(o.get("traits") or []), "photos": o.get("photos"), "points": o.get("points"),
+            "views": o.get("views") or [],
         })
     _assign_support(out)
     doc = {"format": FORMAT, "version": VERSION, "name": name, "map": map_meta or {}, "objects": out}
