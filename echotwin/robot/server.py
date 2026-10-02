@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from . import config
+from . import docpage
 from . import twin_import as TI
 from .ai.brain import Brain
 from .features import video_everyday as VE
@@ -73,6 +74,19 @@ async def dashboard():
 @app.get("/phone")
 async def phone():
     return FileResponse(config.STATIC / "phone.html")
+
+
+GUIDES = {"teaching": ("TEACHING.md", "Teaching the robot")}
+
+
+@app.get("/docs/{name}")
+async def guide_page(name: str):
+    """A guide from docs/ as a page (only the ones listed above)."""
+    if name not in GUIDES:
+        return JSONResponse({"error": "no such guide"}, status_code=404)
+    file, title = GUIDES[name]
+    return Response(docpage.page((config.ROOT / "docs" / file).read_text(encoding="utf-8"), title),
+                    media_type="text/html; charset=utf-8")
 
 
 @app.get("/api/info")
