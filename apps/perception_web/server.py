@@ -48,26 +48,20 @@ def send_to_robot(job: dict) -> dict:
     import urllib.request
 
     job_d = job["dir"]
-    objects_json = job_d / "objects_objects.json"
-    if not objects_json.exists():
+    scene_json = job_d / "objects_scene.json"
+    if not scene_json.exists():
         return {"ok": False, "error": "No object map in this run (need photos/video with objects=on)."}
-
-    # find the point cloud produced by this run
-    cloud = job_d / "cloud.ply"
-    cloud_arg = ["--cloud", str(cloud)] if cloud.exists() else []
 
     title = job.get("title", "Sonar Scan") + " (robot twin)"
     twin_zip = job_d / "robot_twin.zip"
 
-    # run the bridge script (uses the same Python running the webapp)
-    cmd = [sys.executable, "-m", "echotwin.scene.bridge",
-           "--objects", str(objects_json),
+    # build the twin from the scene file (numpy-free, runs in the web app's Python)
+    cmd = [sys.executable, "-m", "echotwin.scene.to_twin", str(scene_json),
            "--out", str(twin_zip),
-           "--name", title,
-           *cloud_arg]
+           "--name", title]
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)
     if r.returncode != 0:
-        return {"ok": False, "error": f"Bridge failed: {r.stderr.strip() or r.stdout.strip()}"}
+        return {"ok": False, "error": f"Could not build the twin: {r.stderr.strip() or r.stdout.strip()}"}
 
     # POST the zip to the Robot server
     data = twin_zip.read_bytes()

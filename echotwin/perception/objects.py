@@ -2,7 +2,8 @@
 
     python -m echotwin.perception.objects data/lounge_vggt.ply -o out/lounge_objects --up y --scale 3.333 --floor-offset 0.29
 
-Writes <out>.png/.yaml (the map, same as mesh_to_grid), <out>_objects.json ("map": grid origin and
+Writes <out>.png/.yaml (the map, same as mesh_to_grid), <out>_scene.json (the scene file the robot twin
+reads, see echotwin/scene/schema.md), <out>_objects.json ("map": grid origin and
 size; "objects": one entry per object with class, centre and size in metres in the map frame,
 height, how many photos saw it) and
 <out>_objects.png (map with the objects drawn on it).
@@ -19,6 +20,7 @@ import numpy as np
 from scipy import ndimage
 
 
+from echotwin.scene import schema as scene_schema
 from echotwin.perception.mapping import (UP, add_scale_args, align_walls, level_floor, load_points,
                                    points_to_grid, resolve_scale)
 
@@ -61,6 +63,7 @@ def find_objects(pts, cls, frame, gmap, names, min_pts=5, min_views=2, min_area=
             "size_x": round(float((np.ptp(cc) + 1) * gmap.res), 2),
             "size_y": round(float((np.ptp(rr) + 1) * gmap.res), 2),
             "height": round(float(np.quantile(z[in_obj], 0.95)), 2) if in_obj.any() else None,
+            "base_z": round(float(np.quantile(z[in_obj], 0.05)), 2) if in_obj.any() else 0.0,
             "photos": int(len(np.unique(f[in_obj]))),
             "points": int(in_obj.sum()),
             "merged": len(kks) - 1,
@@ -165,12 +168,14 @@ def main(argv=None):
     meta = {"origin": [round(gmap.origin[0], 4), round(gmap.origin[1], 4)], "res": gmap.res,
             "width": gmap.W, "height": gmap.H}                   # lets run_demo check it is the same map
     Path(f"{a.out}_objects.json").write_text(json.dumps({"map": meta, "objects": objects}, indent=1))
+    scene_doc = scene_schema.build_scene(objects, meta, name=Path(a.out).name)   # what the robot twin reads
+    scene_schema.save(scene_doc, f"{a.out}_scene.json")
     draw(gmap, objects, label_img, f"{a.out}_objects.png")
     draw(gmap, objects, label_img, f"{a.out}_objects_clean.png", clean=True)
     for o in sorted(objects, key=lambda o: -o["points"]):
         print(f"{o['class']:>14}  at ({o['x']:+.2f}, {o['y']:+.2f}) m  {o['size_x']:.2f} x {o['size_y']:.2f} m"
               f"  h {o['height']} m  seen in {o['photos']} photos" + (f"  ({o['merged']} merged)" if o["merged"] else ""))
-    print(f"{len(objects)} objects -> {a.out}_objects.json / {a.out}_objects.png")
+    print(f"{len(objects)} objects -> {a.out}_scene.json / {a.out}_objects.png")
 
 
 if __name__ == "__main__":

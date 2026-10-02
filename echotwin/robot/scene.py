@@ -20,10 +20,12 @@ class Layout:
     # 3D scans: scenery meshes (visual only): {file, texture?, pos(3), euler(3, deg), scale}
     scene: list = field(default_factory=list)
     meta: dict = field(default_factory=dict)  # e.g. {"sim_scale": sim metres per real metre, "name": ...}
+    # fixed furniture next to the table: {name, shape, pos, size (half xyz), rgb, yaw}; solid, never moved
+    obstacles: list = field(default_factory=list)
 
     def copy(self) -> "Layout":
         return Layout(self.texture, [dict(p) for p in self.props], self.view,
-                      [dict(m) for m in self.scene], dict(self.meta))
+                      [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles])
 
 
 def _f(*v) -> str:
@@ -70,6 +72,14 @@ def build_xml(layout: Layout) -> str:
                      f'<freejoint name="prop_{i}"/>'
                      f'<geom {geom} {look} mass="0.08" friction="1.5 0.05 0.01" condim="6"/></body>')
 
+    fixed = []
+    for i, ob in enumerate(layout.obstacles):
+        hx, hy, hz = ob["size"]
+        r, g, b = ob["rgb"]
+        shape = f'type="cylinder" size="{_f((hx + hy) / 2, hz)}"' if ob.get("shape") == "cylinder"             else f'type="box" size="{_f(hx, hy, hz)}"'
+        fixed.append(f'<geom name="obstacle_{i}" {shape} pos="{_f(ob["pos"][0], ob["pos"][1], hz)}" '
+                     f'euler="0 0 {ob.get("yaw", 0):.1f}" rgba="{_f(r, g, b)} 0.4"/>')
+
     scenery = []
     for k, m in enumerate(layout.scene):
         prop_assets.append(f'<mesh name="scene_{k}" file="{m["file"].replace(chr(92), "/")}" scale="{_f(*([m.get("scale", 1.0)] * 3))}"/>')
@@ -109,6 +119,7 @@ def build_xml(layout: Layout) -> str:
     <geom name="tabletop" type="plane" pos="0 0 0.0002" size="{_f(tw, th, 0.01)}" material="tabletop" contype="0" conaffinity="0"/>
     {"".join(f'<geom type="box" pos="{_f(sx * (tw - 0.04), sy * (th - 0.04), -0.39)}" size="0.025 0.025 0.35" rgba="0.3 0.23 0.17 {0 if layout.scene else 1}"/>' for sx in (-1, 1) for sy in (-1, 1))}
     {"".join(scenery)}
+    {"".join(fixed)}
     {"".join(props)}
     <body name="hand" mocap="true" pos="{_f(*HOME)}">
       <geom type="box" pos="0 0 0.042" size="0.056 0.016 0.009" rgba="0.18 0.19 0.22 1" contype="0" conaffinity="0"/>

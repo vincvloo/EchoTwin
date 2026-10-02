@@ -14,6 +14,8 @@ y away from the viewer. The sim is drawn "sim_scale" times bigger (sim metres pe
      "skin": "skins/prop_0.png",                          # optional photo wrapped on the shape
      "mesh": "meshes/choc.obj", "mesh_texture": "meshes/choc.png"}   # optional 3D-scanned shape
   ],
+  "obstacles": [{"name": "sofa", "shape": "box", "size_cm": [150, 78, 78], "pos_cm": [40, 30], "yaw_deg": 0,
+                 "color": "#34a853"}],                   # optional: fixed furniture, solid, never moved
   "scene": [{"mesh": "scene/room.obj", "texture": "scene/room.png",   # optional 3D scan of the room
              "pos_cm": [0, 0, -37.5], "euler_deg": [0, 0, 0], "scale": 1.0}],  # scale: real metres per mesh unit
   "camera": {"pos_cm": [...], "xyaxes": [...], "fovy": 60}             # optional viewpoint
@@ -71,7 +73,7 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
     k = float(layout.meta.get("sim_scale", 2.0))
     cm = lambda v: round(float(v) / k * 100, 2)
     doc = {"format": FORMAT, "version": 1, "name": layout.meta.get("name", name), "sim_scale": k,
-           "table_texture": _copy(layout.texture, file_dir, "."), "objects": [], "scene": []}
+           "table_texture": _copy(layout.texture, file_dir, "."), "objects": [], "obstacles": [], "scene": []}
     if doc["table_texture"]:
         doc["table_texture"] = doc["table_texture"].lstrip("./")
     for i, pr in enumerate(layout.props):
@@ -86,6 +88,11 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
             if rel:
                 o[key] = rel
         doc["objects"].append(o)
+    for ob in layout.obstacles:
+        doc["obstacles"].append({"name": ob["name"], "shape": ob.get("shape", "box"),
+                                 "size_cm": [cm(2 * v) for v in ob["size"]],
+                                 "pos_cm": [cm(ob["pos"][0]), cm(ob["pos"][1])],
+                                 "yaw_deg": round(float(ob.get("yaw", 0.0)), 1), "color": _hex(ob["rgb"])})
     for m in layout.scene:
         e = {"mesh": _copy(m["file"], file_dir, "scene"), "pos_cm": [cm(v) for v in m.get("pos", (0, 0, 0))],
              "euler_deg": list(m.get("euler", (0, 0, 0))), "scale": round(m.get("scale", k) / k, 6)}
@@ -135,6 +142,14 @@ def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
             pr["size"] = tuple(float(v) for v in extent(pr["mesh"]) * pr["mesh_scale"][0] / 2)  # true shape
             pr["mesh_texture"] = f(o.get("mesh_texture"))
         lay.props.append(pr)
+    for i, o in enumerate(doc.get("obstacles", [])):
+        shape = o.get("shape", "box")
+        if shape not in ("box", "cylinder"):
+            shape = "box"
+        w, d, h = (max(0.5, float(v)) for v in o.get("size_cm", [10, 10, 10]))
+        lay.obstacles.append({"name": str(o.get("name") or f"obstacle {i + 1}")[:40], "shape": shape,
+                              "pos": (m(o["pos_cm"][0]), m(o["pos_cm"][1])), "yaw": float(o.get("yaw_deg", 0.0)),
+                              "size": (m(w) / 2, m(d) / 2, m(h) / 2), "rgb": _rgb(o.get("color"))})
     for e in doc.get("scene", []):
         lay.scene.append({"file": f(e["mesh"]), "texture": f(e.get("texture")),
                           "pos": tuple(m(v) for v in e.get("pos_cm", (0, 0, 0))),

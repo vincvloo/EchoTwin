@@ -9,10 +9,10 @@ One run goes through eight steps. Each step hands one file to the next.
 | 3 | Level and scale: floor RANSAC, wall alignment, scale from phone height or `--ref` | `perception/mapping.py` | metric, levelled points |
 | 4 | Detect: YOLO11-seg per photo, labels onto points, multi-view voting | `perception/detect.py`, `objects.py` | `<stem>_objects.json`, map |
 | 5 | Review (planned, PR3): NVIDIA vision confirms, renames, skips | not yet | reviewed objects |
-| 6 | Scene file (planned, PR2): one file both halves read | not yet | `scene.json` |
+| 6 | Scene file: class catalog (shape, movable, surface), support, one file both halves read | `scene/catalog.py`, `scene/schema.py` | `<stem>_scene.json` ([format](../echotwin/scene/schema.md)) |
 | 7a | Room: occupancy map, sonar particle filter | `navigation/` | GIF, error plots |
-| 7b | Surface: pick a table, build the digital twin | `scene/bridge.py` (now), `scene/to_twin.py` (PR2) | twin `.zip` |
+| 7b | Surface: pick a table-sized window, build the digital twin (objects to move, fixed obstacles) | `scene/to_twin.py` | twin `.zip` |
 | 8 | Act and learn: say it and it does it, says it is already done, or asks to be shown | `robot/` | demos, skills |
 
-Steps 5 and 6 and the table-fitting part of 7b do not exist yet; see the PR list in `TASKS.md`.
+Step 5 does not exist yet; see the PR list in `TASKS.md`.
 All capture alternatives are compared in `APPROACHES.md`.
