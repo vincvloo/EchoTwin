@@ -393,7 +393,7 @@ class Sim:
         task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
                 "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
                 "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
-                "h": float(w.half(me)), "tallest": float(max(2 * w.half(n) for n in w.things())),
+                "h": float(w.half(me)), "tallest": float(w.tallest()),
                 "start": [float(o[0]), float(o[1])]}
         if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
             task["stack"] = True

@@ -57,6 +57,11 @@ class World:
         hx, hy, _ = self.layout.props[int(name[5:])]["size"]
         return max(hx, hy)
 
+    def tallest(self) -> float:
+        """Height of the tallest thing on the table: objects and fixed obstacles."""
+        hs = [2 * self.half(n) for n in self.things()] + [2 * o["size"][2] for o in self.layout.obstacles]
+        return max(hs, default=0.0)
+
     def things(self) -> list[str]:
         """Everything the gripper can pick up."""
         return [f"prop_{i}" for i in range(len(self.layout.props))]

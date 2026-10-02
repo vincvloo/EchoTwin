@@ -9,7 +9,7 @@ Hardware: phone + laptop (RTX 2050, 4 GB). No physical robot; everything robot-s
 ## Layout
 - `echotwin/perception/`: photos/video -> VGGT cloud -> level and scale -> YOLO -> object map. GPU env.
 - `echotwin/navigation/`: sonar model, differential-drive robot, particle filter, demo run.
-- `echotwin/scene/`: shared contract between perception and robot (numpy only).
+- `echotwin/scene/`: shared contract between perception and robot (no heavy dependencies): `schema.py` (scene.json), `catalog.py` (class -> shape / movable), `to_twin.py`.
 - `echotwin/robot/`: MuJoCo twin, server, router, skills, voice, twin import. Robot env.
 - `apps/perception_web` (port 8765), `apps/robot_ui` (dashboard + phone pages, served by the robot server).
 - `data/ out/ runs/ models/ certs/` are local and git-ignored.

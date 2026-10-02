@@ -13,7 +13,7 @@ cheap ultrasonic sensors instead of a laser.
 3. **Level and scale**: find the floor, align the walls, set the size from the phone height.
 4. **Detect**: YOLO finds objects in each photo and votes them into 3D.
 5. **Review** *(planned)*: an NVIDIA vision model confirms or corrects each detection.
-6. **Scene file** *(planned)*: one file both halves read.
+6. **Scene file**: every object gets a shape and a "can I move it" flag; one `scene.json` that both halves read.
 7. **Use the map**: (a) a sonar robot localizes in the room; (b) a table becomes a digital twin.
 8. **Act and learn**: tell the robot what to move ("put the glass next to the chocolate"). It does it, says it is already done, or asks you to show it once.
 
@@ -52,7 +52,7 @@ Everything runs offline without API keys. `AI_API_KEY` (NVIDIA) adds object nami
 | Photos -> cloud (VGGT) | `python -m echotwin.perception.reconstruct examples/lounge_photos -o data/lounge.ply --cam-height 1.3` |
 | Cloud -> YOLO labels | `python -m echotwin.perception.detect data/lounge.ply` |
 | Labels -> map + objects | `python -m echotwin.perception.objects data/lounge.ply -o out/lounge --up y --scale 3.333 --floor-offset 0.29` |
-| Objects -> robot twin | `python -m echotwin.scene.bridge --objects out/lounge_objects.json --out data/twin.zip` |
+| Objects -> robot twin | `python -m echotwin.scene.to_twin out/lounge_scene.json --out data/twin.zip` |
 | Robot server | `<robot python> -m echotwin.robot.server` |
 | Tests | `python -m pytest -q tests/perception` and `<robot python> -m pytest -q tests/robot tests/scene` |
 

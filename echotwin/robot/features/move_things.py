@@ -108,6 +108,12 @@ def goal_xy(world, plan: dict) -> np.ndarray:
         dv = target - q
         if np.linalg.norm(dv) < need:
             target = q + dv / (np.linalg.norm(dv) + 1e-9) * need
+    for ob in world.layout.obstacles:  # and off fixed furniture
+        q = np.array(ob["pos"][:2])
+        need = r + max(ob["size"][0], ob["size"][1]) + 0.01
+        dv = target - q
+        if np.linalg.norm(dv) < need:
+            target = q + dv / (np.linalg.norm(dv) + 1e-9) * need
     return np.clip(target, -lim, lim)
 
 
