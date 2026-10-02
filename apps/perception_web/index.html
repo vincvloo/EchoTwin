@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Scan-to-Sonar</title>
+<title>EchoTwin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -135,6 +135,21 @@ details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
 .history button { text-align: left; background: transparent; color: var(--ink); border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; font-weight: 400; padding: 8px 0; display: flex; justify-content: space-between; gap: 10px; }
 .history button span:last-child { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
+/* Info dialog: photos vs Scaniverse vs LiDAR */
+.info-btn { background: transparent; color: var(--signal); border: 1px solid var(--signal); border-radius: 999px;
+            font: 600 12px var(--body); padding: 3px 10px; cursor: pointer; margin-top: 8px; }
+.info-btn:hover { background: var(--signal-soft); }
+dialog#capinfo { max-width: min(900px, 94vw); width: 100%; border: 1px solid var(--rule); border-radius: 8px;
+                 background: var(--panel); color: var(--ink); padding: 0; }
+dialog#capinfo::backdrop { background: rgba(0, 0, 0, .55); }
+dialog#capinfo .in { padding: 18px 20px 20px; display: flex; flex-direction: column; gap: 14px; }
+dialog#capinfo h2 { margin: 0; font: 700 20px var(--display); }
+dialog#capinfo .close { align-self: flex-end; margin: 0 0 -8px; }
+.three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.three figure img { aspect-ratio: 1 / 1; object-fit: contain; }
+@media (max-width: 640px) { .three { grid-template-columns: 1fr; } }
+.best td:first-child, .best th:first-child { border-left: 3px solid var(--signal); }
+
 /* Robot bridge button */
 .robot-bar { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--signal-soft);
              border: 1px solid var(--signal); border-radius: 6px; flex-wrap: wrap; }
@@ -161,7 +176,7 @@ details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
     <nav class="modes" aria-label="Views"><a href="/pitch/">Pitch deck</a><span aria-current="page">Live demo</span></nav>
     <div>
       <div class="eyebrow">Physical AI Hackathon · Perceive / Decide / Act</div>
-      <h1>Scan-to-Sonar</h1>
+      <h1>EchoTwin</h1>
       <p class="sub">Give it a room: a phone scan, a few photos or a video. It builds the map a sonar robot needs, finds the objects, and shows a simulated robot localizing itself with four ultrasonic sensors.</p>
     </div>
   </header>
@@ -191,6 +206,7 @@ details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
           <label class="check" data-for="photos"><input id="objects" type="checkbox" checked> Detect objects</label>
         </div>
         <p class="hint" id="kindhint">Photos and videos have no metric scale: it is estimated from the phone height.</p>
+        <button class="info-btn" id="capinfoBtn" type="button" aria-haspopup="dialog">ⓘ Photos, Scaniverse or LiDAR?</button>
         <div class="bar" id="bar" hidden><i></i></div>
         <button id="run" disabled>Analyse</button>
       </section>
@@ -532,6 +548,42 @@ async function init() {
 }
 
 init();
+</script>
+<dialog id="capinfo" aria-labelledby="capinfoTitle">
+  <div class="in">
+    <button class="info-btn close" type="button" id="capinfoClose">Close</button>
+    <h2 id="capinfoTitle">Three ways to capture a place</h2>
+    <p class="hint">EchoTwin works from photos or a video, because every phone can do that. A Scaniverse scan or a LiDAR
+      mesh is more accurate and already metric, but needs an app, or a device with a LiDAR sensor, which costs more.
+      We tested all three on the same pipeline.</p>
+    <div class="three">
+      <figure><img src="/pitch/map_lounge.png" alt="Map of the stage built from 13 photos"><figcaption>13 photos + VGGT · cleanest map</figcaption></figure>
+      <figure><img src="/pitch/map_splat.png" alt="Map of the stage built from a Scaniverse scan"><figcaption>Scaniverse scan of the same stage · metric, noisier</figcaption></figure>
+      <figure><img src="/pitch/map_home.png" alt="Map of a furnished apartment built from an iPad LiDAR scan"><figcaption>LiDAR mesh of an apartment · 7.0 × 6.2 m</figcaption></figure>
+    </div>
+    <div class="tablewrap"><table>
+      <thead><tr><th></th><th>Photos / video + VGGT</th><th>Scaniverse (phone app)</th><th>LiDAR (iPad mesh)</th></tr></thead>
+      <tbody>
+        <tr class="best"><td>Needs</td><td>Any phone camera</td><td>A phone with the app</td><td>A device with a LiDAR sensor</td></tr>
+        <tr><td>Scale</td><td>Estimated from the phone height; stage height within about 5 % of the Scaniverse scan</td><td>Metric</td><td>Metric (table top 0.75 m, ceiling 2.25 to 2.30 m)</td></tr>
+        <tr class="best"><td>Names the objects</td><td>Yes: YOLO, then a vision-model review</td><td>No</td><td>No</td></tr>
+        <tr><td>Map in our test</td><td>Cleanest: armchairs, sofa, lamps</td><td>Works, noisier</td><td>93 % of the floor, table legs visible</td></tr>
+        <tr><td>Sonar localization (simulated)</td><td>Under 1 s, error about 1 cm, recovers in about 1 s after a kidnap</td><td>5 of 5 runs, error about 1 cm, 5 of 5 recoveries</td><td>1 to 3 cm with 6 obstacles missing from the map, recovery about 9 s</td></tr>
+        <tr><td>Processing here</td><td>About 2 to 3 min on a laptop GPU</td><td>About 30 s</td><td>About 40 s</td></tr>
+      </tbody>
+    </table></div>
+    <p class="hint">Small things are the weak spot of photos: the reconstructed table is flat to only 2 to 3 cm, so objects
+      under about 5 cm can vanish. Scaniverse and LiDAR data are not part of this repository (the LiDAR scan is licensed
+      for non-commercial use); upload your own file here to try them.</p>
+  </div>
+</dialog>
+<script>
+(() => {
+  const d = document.getElementById("capinfo");
+  document.getElementById("capinfoBtn").addEventListener("click", () => d.showModal());
+  document.getElementById("capinfoClose").addEventListener("click", () => d.close());
+  d.addEventListener("click", (e) => { if (e.target === d) d.close(); });
+})();
 </script>
 </body>
 </html>

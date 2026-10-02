@@ -17,7 +17,7 @@ cheap ultrasonic sensors instead of a laser.
 7. **Use the map**: (a) a sonar robot localizes in the room; (b) a table becomes a digital twin.
 8. **Act and learn**: tell the robot what to move ("put the glass next to the chocolate"). It does it, says it is already done, or asks you to show it once.
 
-Details: [docs/PIPELINE.md](docs/PIPELINE.md). Other capture methods and why photos are the main one:
+Details: [docs/PIPELINE.md](docs/PIPELINE.md). How to teach the robot (and how to film a demo): [docs/TEACHING.md](docs/TEACHING.md). Other capture methods and why photos are the main one:
 [docs/APPROACHES.md](docs/APPROACHES.md). Roadmap: [docs/TASKS.md](docs/TASKS.md).
 
 ## Setup
