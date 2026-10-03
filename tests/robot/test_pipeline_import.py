@@ -65,6 +65,27 @@ def _go(tmp_path, cfg=CFG, photos=PHOTOS, **kw):
     return rec, calls
 
 
+@pytest.mark.parametrize("line,said", [
+    ("marker: seen in 4 of 5 photos, the photos agree within 1.3 % | scale hint from the marker (true scale): --scale 0.0412",
+     "I found the marker"),
+    ("marker: seen in 2 of 5 photos but the readings disagree (30 %): not used", "disagree"),
+    ("marker: not seen", "did not see the marker")])
+def test_the_robot_says_whether_it_saw_the_marker(tmp_path, line, said):
+    (tmp_path / "input").mkdir()
+    rec = Rec(tmp_path)
+    hint = "camera height | scale hint if you held the phone at 0.45 m: --scale 0.512"
+
+    async def run(argv, cwd, skip, tick, env=None):
+        text = " ".join(argv)
+        if "reconstruct" in text:
+            return "done", line + chr(10) + hint + chr(10)
+        if "perception.objects" in text:
+            _scene(tmp_path, TABLE)
+        return "done", ""
+    asyncio.run(P.import_photos_auto(PHOTOS, [], rec.ctx, cfg=CFG, run=run))
+    assert any(said in s for s in rec.said), rec.said
+
+
 def test_full_run_builds_the_twin_and_passes_the_scale_on(tmp_path):
     (tmp_path / "input").mkdir()
     rec, calls = _go(tmp_path)

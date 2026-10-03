@@ -11,6 +11,7 @@ Scale is approximate (camera height assumed), which is fine for a twin you look 
 import cv2
 import numpy as np
 
+from ...perception import marker as MK
 from ..scene import TABLE_ASPECT
 
 CAM_HEIGHT = 0.45        # metres above the table, assumed
@@ -155,13 +156,39 @@ Reply with JSON only: {"objects": [{"id": 1, "name": "black earbud case", "shape
 Use "skip": true for a box that is not a real object (shadow, reflection, part of the table)."""
 
 
-def analyse(jpeg_or_bgr, pitch_deg: float | None = None) -> dict:
-    """Stage 1 (no AI): segment and measure. Returns everything the layout needs."""
+def erase_marker(bgr: np.ndarray, corners: np.ndarray) -> np.ndarray:
+    """Paint the printed marker (and its white border) with the colour of the table around it, so it is not an object."""
+    c = corners.mean(0)
+    big = (c + (corners - c) * 1.7).astype(np.int32)
+    outer = (c + (corners - c) * 2.6).astype(np.int32)
+    ring = np.zeros(bgr.shape[:2], np.uint8)
+    cv2.fillConvexPoly(ring, outer, 255)
+    cv2.fillConvexPoly(ring, big, 0)
+    colour = np.median(bgr[ring > 0], axis=0) if (ring > 0).any() else (200, 200, 200)
+    out = bgr.copy()
+    cv2.fillConvexPoly(out, big, tuple(int(v) for v in colour))
+    return out
+
+
+def analyse(jpeg_or_bgr, pitch_deg: float | None = None, marker_m: float | None = None) -> dict:
+    """Stage 1 (no AI): segment and measure. Returns everything the layout needs.
+
+    With `marker_m` (the printed marker's side in metres) and the marker in the photo, the camera height and
+    angle come from the marker instead of the phone's pitch and an assumed height."""
     bgr = jpeg_or_bgr if isinstance(jpeg_or_bgr, np.ndarray) else \
         cv2.imdecode(np.frombuffer(jpeg_or_bgr, np.uint8), cv2.IMREAD_COLOR)
     bgr = _prep(bgr)
     pitch = 45.0 if pitch_deg is None else float(pitch_deg)
-    cam = Camera(bgr.shape, pitch)
+    height, cal = CAM_HEIGHT, {"source": "estimate"}
+    corners = MK.detect(bgr) if marker_m else None
+    if corners is not None:
+        p = MK.pose(corners, marker_m, bgr.shape, f=0.78 * max(bgr.shape[:2]))
+        if p["error_px"] < 3.0:
+            pitch, height = float(np.clip(p["pitch_deg"], 15, 89)), p["height"]
+            cal = {"source": "marker", "height": round(height, 3), "pitch_deg": round(pitch, 1),
+                   "error_px": round(p["error_px"], 2)}
+            bgr = erase_marker(bgr, corners)
+    cam = Camera(bgr.shape, pitch, height)
     table, objs = segment(bgr)
     items = []
     for o in objs:
@@ -179,7 +206,7 @@ def analyse(jpeg_or_bgr, pitch_deg: float | None = None) -> dict:
         colour = cv2.mean(bgr, mask=o["mask"].astype(np.uint8))[:3][::-1]
         items.append({"box": o["box"], "xy": centre[:2].tolist(), "size": [width, depth, min(height, 3 * width + 0.05)],
                       "rgb": [c / 255 for c in colour], "name": None, "shape": "box", "mask": o["mask"]})
-    return {"bgr": bgr, "table": table, "items": items, "cam": cam, "pitch": pitch,
+    return {"bgr": bgr, "table": table, "items": items, "cam": cam, "pitch": pitch, "calibration": cal,
             "marks": marks_image(bgr, [{"box": i["box"]} for i in items])}
 
 

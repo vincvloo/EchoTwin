@@ -8,7 +8,7 @@ training set, any object a detector can name instead of a fixed list.
 
 ## How it works, in six steps
 
-1. **Capture**: about 10 phone photos or a short video of a table ([how](docs/CAPTURE_GUIDE.md)).
+1. **Capture**: about 10 phone photos or a short video of a table ([how](docs/CAPTURE_GUIDE.md)), with an optional printed marker on the table for true sizes.
 2. **Reconstruct**: VGGT turns the photos into a 3D point cloud.
 3. **Level and scale**: find the table plane, set the size from the phone height.
 4. **Detect**: an open-vocabulary detector names the objects in each photo and votes them into 3D.

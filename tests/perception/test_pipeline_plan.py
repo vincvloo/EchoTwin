@@ -26,6 +26,14 @@ def test_scale_is_read_from_the_reconstruction_output_and_filled_in():
     assert PL.fill(["a", "{scale}"], None) == ["a", "1.0"]
 
 
+def test_the_marker_scale_wins_over_the_camera_height_guess():
+    marker = 'marker: seen in 4 of 5 photos, the photos agree within 1.3 % | scale hint from the marker (true scale): --scale 0.0412'
+    height = 'camera height above floor: 0.88 units | scale hint if you held the phone at 0.45 m: --scale 0.512'
+    assert PL.find_scale(marker + chr(10) + height) == 0.0412
+    unused = 'marker: seen in 2 of 5 photos but the readings disagree (30 %): not used'
+    assert PL.find_scale(unused + chr(10) + height) == 0.512
+
+
 def test_settings_and_reasons_it_cannot_run(tmp_path):
     cfg = PL.settings({"PERCEPTION_PY": "x", "SCAN_FRAMES": "8", "SCAN_MODE": "QUICK"})
     assert cfg["frames"] == 8 and cfg["mode"] == "quick" and cfg["maps_py"] == cfg["gpu_py"]

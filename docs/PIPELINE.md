@@ -27,8 +27,17 @@ About 2 minutes for 10 photos on an RTX 2050 (reconstruction 90 s, detection 20 
 
 Settings in `.env`, all paths relative to the repository or absolute: `PERCEPTION_PY`, `PERCEPTION_MAPS_PY`
 (if the GPU environment has no scipy), `VGGT_PATH` (default `third_party/vggt`), `SCAN_MODE`
-(`auto` | `quick` | `3d`), `SCAN_FRAMES`, `SCAN_CAM_HEIGHT`, `DETECT_PROMPTS`.
+(`auto` | `quick` | `3d`), `SCAN_FRAMES`, `SCAN_CAM_HEIGHT`, `DETECT_PROMPTS`, `MARKER_SIZE_CM`.
 
-Known limits: the scale comes from the phone height (`SCAN_CAM_HEIGHT`), so absolute sizes can be off by a
-factor; the twin is scaled to the sim table anyway. The table texture (photo of the table) is not built in 3D
-mode yet.
+**Calibration (the marker).** A printed AprilTag on the table (`perception/marker.py`, page from `--print`) gives the true
+scale. `reconstruct.py` finds it in the photos and places its corners with VGGT's point maps (`marker_scale.py`); the
+photos must agree within 5 %. It then prints `scale hint from the marker (true scale)` before the camera-height line, so the
+existing scale hand-over (`pipeline.find_scale`) takes the marker's value, and writes `<cloud>.marker.json`. `objects.py` uses
+the marker's plane as the table (z = 0, origin at the marker, x along its top edge) instead of levelling the lowest surface,
+and records `calibration` in `scene.json` (`source`, `scale`, `cloud_to_map`; see `echotwin/scene/schema.md`). In quick mode
+the marker gives the camera height and angle. After the twin is built, `twin_import/texture3d.py` paints the table texture
+from the photos (median over views, marker painted out).
+
+Without a marker nothing changes except the message: the scale comes from the phone height (`SCAN_CAM_HEIGHT`) and absolute
+sizes can be off by a factor. Known limits: the marker needs to be seen in at least two photos; the table texture is
+built only when the scan has a marker or a surface to paint.
