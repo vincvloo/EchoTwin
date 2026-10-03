@@ -1,0 +1,173 @@
+"""How well do the default skills work in the simulation? Run each kind of move many times and count.
+
+    python -m echotwin.robot.skillcheck                 # 6 trials per shape and task, writes out/skillcheck.json
+    python -m echotwin.robot.skillcheck --trials 12 --shapes box cylinder
+
+One trial: a table with the object to move (one of the four shapes, real size) and a small box, the object's
+position drawn at random inside what the arm can reach, then the whole move with the default skill (grip height,
+lift, drop, speed from `prop_skills.DEFAULTS`), judged like a real run: does it land where it should, upright,
+without knocking anything over. The failure reason is the first thing that went wrong.
+
+It only uses the public pieces (World, prop_skills, move_things), so the same file runs on the older kinematic
+simulation and on the arm with a contact grasp: that is how the two were compared (docs/RESULTS.md).
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+from .features import move_things as MT
+from .features import prop_skills as PS
+from .scene import Layout
+from .world import CTRL_DT, World
+
+# real sizes, full (x, y, z) in metres
+SHAPES = {"flat": (0.10, 0.06, 0.02), "box": (0.05, 0.04, 0.04), "cylinder": (0.07, 0.07, 0.10), "round": (0.05, 0.05, 0.05)}
+OTHER = (0.05, 0.05, 0.05)
+TASKS = ("next to", "to the left", "on top of")
+RGB = {"flat": (0.9, 0.9, 0.85), "box": (0.2, 0.4, 0.8), "cylinder": (0.8, 0.8, 0.8), "round": (0.2, 0.2, 0.2)}
+MAX_TICKS = 1200
+
+
+def _scale() -> float:
+    """1.0 in the real-scale simulation. The older one drew everything twice as big."""
+    return 1.0 if hasattr(Layout(), "table_half") else 2.0
+
+
+def _prop(name, shape, size, pos, k):
+    return {"name": name, "shape": shape, "pos": (pos[0] * k, pos[1] * k), "yaw": 0.0,
+            "size": tuple(v * k / 2 for v in size), "rgb": RGB[shape]}
+
+
+def _spawn(rng, w_probe: World | None, k: float):
+    """Two spots, at least 12 cm apart, inside what the arm can reach."""
+    for _ in range(500):
+        pts = []
+        for _ in range(2):
+            if w_probe is not None and hasattr(w_probe, "workspace_sample"):
+                pts.append(w_probe.workspace_sample(rng))
+            else:
+                pts.append((rng.uniform(-0.18, 0.18), rng.uniform(-0.10, 0.12)))
+        if np.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]) > 0.12:
+            return pts
+    raise RuntimeError("no two spots found")
+
+
+def make_task(w: World, plan: dict, heard: str) -> dict:
+    """The same task description the robot makes for a spoken move (see Sim._make_prop_task)."""
+    me = "prop_0"
+    pr = w.layout.props[0]
+    goal = MT.goal_xy(w, plan)
+    o = w.obj_pos(me)
+    shape = pr.get("shape", "box")
+    task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape, "name": pr["name"],
+            "instruction": heard, "goal": [float(goal[0]), float(goal[1])], "ref": "prop_1" if plan["goal"][0] == "near" else None,
+            "h": float(w.half(me)), "tallest": float(w.tallest() if hasattr(w, "tallest") else max(2 * w.half(n) for n in w.things())),
+            "start": [float(o[0]), float(o[1])]}
+    if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
+        task["stack"] = True
+        task["ref_name"] = w.layout.props[1]["name"]
+    return task
+
+
+def trial(shape: str, task_name: str, rng: np.random.Generator) -> dict:
+    k = _scale()
+    probe = None
+    try:
+        probe = World(Layout())
+    except Exception:
+        pass
+    (ax, ay), (bx, by) = _spawn(rng, probe, k)
+    lay = Layout()
+    lay.props = [_prop("mover", shape, SHAPES[shape], (ax, ay), k), _prop("other", "box", OTHER, (bx, by), k)]
+    w = World(lay)
+    w.settle(20)
+    plan = {"prop": 0, "goal": ("near", 1, task_name) if task_name != "to the left" else ("dir", (-1, 0), 0.12 * k)}
+    if hasattr(w, "can_grasp") and not w.can_grasp("prop_0"):
+        return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0}
+    if hasattr(w, "reachable") and not w.reachable(w.obj_pos("prop_0")[:2]):
+        return {"ok": False, "why": "refused: out of reach", "seconds": 0.0}
+    task = make_task(w, plan, f"put the mover {task_name}")
+    wps = PS.waypoints(w, task, dict(PS.DEFAULTS))
+    before = {n: w.obj_pos(n)[:2].copy() for n in w.things()}
+    r = {"wps": wps, "i": 0, "speed": PS.DEFAULTS["speed"]}
+    if hasattr(w, "grasp_yaw"):
+        r["yaw"] = w.grasp_yaw(task["object"])
+    ticks = 0
+    while ticks < MAX_TICKS:
+        a = PS.waypoint_action(w, r)
+        if a is None:
+            break
+        w.step(a)
+        ticks += 1
+    w.settle(25)
+    res = PS.outcome(w, task, before)
+    ok = bool(res["ok"] and PS.goal_met(w, task))
+    why = "" if ok else (res["text"] if not res["ok"] else "it did not end where it should")
+    if ticks >= MAX_TICKS:
+        why, ok = "ran out of time", False
+    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT}
+
+
+def reason_key(why: str) -> str:
+    """Group the long sentences into a few causes."""
+    for key in ("tips over", "bumps", "slides off", "lands", "refused", "ran out of time", "did not end"):
+        if key in why:
+            return key
+    return why[:40] or "ok"
+
+
+def run(trials: int, shapes, tasks, seed: int = 7) -> dict:
+    rng = np.random.default_rng(seed)
+    out = {"scale": _scale(), "trials": trials, "cells": {}}
+    for s in shapes:
+        for t in tasks:
+            t0 = time.time()
+            rs = [trial(s, t, rng) for _ in range(trials)]
+            wins = [r for r in rs if r["ok"]]
+            out["cells"][f"{s} | {t}"] = {
+                "success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
+                "failures": dict(Counter(reason_key(r["why"]) for r in rs if not r["ok"])), "wall": round(time.time() - t0, 1)}
+            c = out["cells"][f"{s} | {t}"]
+            print(f"  {s:9s} {t:12s} {c['success']:4.0%}  {c['failures'] or ''}", flush=True)
+    return out
+
+
+def table(res: dict) -> str:
+    shapes = sorted({k.split(" | ")[0] for k in res["cells"]}, key=list(SHAPES).index)
+    tasks = [t for t in TASKS if any(k.endswith(" | " + t) for k in res["cells"])]
+    lines = ["| Shape | " + " | ".join(tasks) + " |", "|---|" + "---|" * len(tasks)]
+    for s in shapes:
+        cells = []
+        for t in tasks:
+            c = res["cells"].get(f"{s} | {t}")
+            cells.append(f"{c['success']:.0%}" if c else "-")
+        lines.append(f"| {s} | " + " | ".join(cells) + " |")
+    ok = np.mean([c["success"] for c in res["cells"].values()])
+    lines.append("| **all** | " + " | ".join([""] * (len(tasks) - 1) + [f"**{ok:.0%}**"]) + " |")
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--trials", type=int, default=6)
+    ap.add_argument("--shapes", nargs="+", default=list(SHAPES), choices=list(SHAPES))
+    ap.add_argument("--tasks", nargs="+", default=list(TASKS), choices=list(TASKS))
+    ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--out", default="out/skillcheck.json")
+    a = ap.parse_args(argv)
+    res = run(a.trials, a.shapes, a.tasks, a.seed)
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
+    print("\n" + table(res))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

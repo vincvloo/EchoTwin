@@ -56,9 +56,9 @@ def _everyday_layout():
     from echotwin.robot.scene import Layout
     lay = Layout()
     lay.props = [
-        {"name": "glass of water", "pos": (-0.1, 0.1), "size": (0.05, 0.05, 0.07), "rgb": (0.8, 0.8, 0.8), "shape": "cylinder"},
+        {"name": "glass of water", "pos": (-0.1, 0.05), "size": (0.035, 0.035, 0.07), "rgb": (0.8, 0.8, 0.8), "shape": "cylinder"},
         {"name": "black earbud case", "pos": (0.2, -0.05), "size": (0.035, 0.03, 0.025), "rgb": (0.1, 0.1, 0.1), "shape": "box"},
-        {"name": "chocolate bar", "pos": (-0.2, -0.2), "size": (0.06, 0.035, 0.006), "rgb": (0.9, 0.9, 0.9), "shape": "flat"},
+        {"name": "chocolate bar", "pos": (-0.25, -0.05), "size": (0.06, 0.035, 0.01), "rgb": (0.9, 0.9, 0.9), "shape": "flat"},
     ]
     return lay
 
@@ -78,13 +78,13 @@ def _human_demo(sim, task):
 
     o = w.obj_pos(task["object"])
     g, h = task["goal"], task["h"]
-    drive([o[0], o[1], 0.2], False)
-    drive([o[0], o[1], max(o[2], 0.013)], False)
-    for _ in range(4):
+    drive([o[0], o[1], 0.085], False)
+    drive([o[0], o[1], 0.004], False)
+    for _ in range(15):
         sim.human_grip = True
         sim._tick()
-    drive([o[0], o[1], 0.22], True)
-    drive([g[0], g[1], 0.22], True)
+    drive([o[0], o[1], 0.085], True)
+    drive([g[0], g[1], 0.085], True)
     drive([g[0], g[1], h + 0.006], True)
     for _ in range(30):
         sim.set_human(0, 0, 0)
@@ -128,9 +128,9 @@ def test_everyday_teach_per_object_type(sim):
     sim.handle_prop_task(MT.parse(text, sim.world.layout.props), text)
     assert decisions()[-1]["kind"] == "done", said()[-2:]
     # 5. the glass is another kind of object: teach me again
-    t2 = "move the glass to the left"
+    t2 = "move the glass closer"
     sim.handle_prop_task(MT.parse(t2, sim.world.layout.props), t2)
-    assert decisions()[-1]["kind"] == "teach" and decisions()[-1]["reason"] == "new_kind"
+    assert decisions()[-1]["kind"] == "teach" and decisions()[-1]["reason"] == "new_kind", decisions()[-1]
 
 
 
