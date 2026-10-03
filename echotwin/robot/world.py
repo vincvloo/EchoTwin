@@ -260,6 +260,14 @@ class World:
         """The simulation that plans and imagines. For the sim back-end that is the world itself."""
         return self
 
+    @property
+    def view(self) -> "World":
+        """The world to draw on the dashboard: what the robot is really doing."""
+        return self
+
+    def enable(self):
+        """Let the arm move (a real arm waits for this before its first move)."""
+
     def stop(self):
         """Emergency stop. The simulation has nothing to switch off (Sim halts the ticks)."""
 

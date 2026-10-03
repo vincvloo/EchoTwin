@@ -114,7 +114,7 @@ def test_the_unarmed_backend_does_not_move_until_armed():
     for _ in range(10):
         r.step((0.2, 0.0, 0.0, 0, 0.0))
     assert not r.arm_ready() and np.allclose(r.hand_pos(), p)
-    r.arm()
+    r.enable()
     for _ in range(20):
         r.step((0.2, 0.0, 0.0, 0, 0.0))
     assert np.linalg.norm(r.hand_pos() - p) > 0.01

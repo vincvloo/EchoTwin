@@ -57,7 +57,7 @@ class RealBackend:
     def arm_ready(self) -> bool:
         return self.armed
 
-    def arm(self):
+    def enable(self):
         self.armed = True
 
     def step(self, action, d=None, hs=None):
@@ -116,6 +116,11 @@ class RealBackend:
         if d is None and self.observer is not None:
             return self.observer.tilt(name)
         return self.twin.tilt(name, d)
+
+    @property
+    def view(self) -> World:
+        """Draw the mock arm's own world when there is one (it is the 'real' one), else the twin."""
+        return self.driver.plant or self.twin
 
     # ---------- safety
     def stop(self):

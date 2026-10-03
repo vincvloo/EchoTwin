@@ -69,3 +69,38 @@ class Backend(Protocol):
 def missing(obj) -> list[str]:
     """The names of the contract that `obj` does not provide (empty when it is a complete back-end)."""
     return [n for n in CONTRACT if not callable(getattr(obj, n, None))]
+
+
+# ---------------------------------------------------------------- choosing one
+def make(layout=None, env=None) -> tuple["Backend", str]:
+    """The back-end named by BACKEND in the environment, and a sentence that says what was chosen.
+
+    BACKEND=sim (default): the simulation is the robot.
+    BACKEND=real: servos move the arm on REAL_PORT. Without a port the mock arm is used (an arm that is not the
+    simulation); a port that cannot be opened falls back to the simulation. The real arm waits for "arm the robot"
+    before its first move unless REAL_REQUIRE_GO=0."""
+    import os
+    from .arm import ArmError
+    from .drivers import DriverError, MockDriver
+    from .real import RealBackend, TruthObserver
+    from .world import World
+    env = os.environ if env is None else env
+    kind = (env.get("BACKEND") or "sim").strip().lower()
+    if kind not in ("sim", "real"):
+        return World(layout), f"BACKEND={kind!r} is not sim or real: using the simulation."
+    if kind == "sim":
+        return World(layout), "Simulation."
+    twin = World(layout)
+    port = (env.get("REAL_PORT") or "").strip()
+    go = (env.get("REAL_REQUIRE_GO") or "1").strip() != "0"
+    if not port:
+        drv = MockDriver(twin.layout, twin.arm)
+        return (RealBackend(twin, drv, observer=TruthObserver(drv.plant), armed=True),
+                "No REAL_PORT: running the mock arm (a simulated arm that is not the simulation: lag, encoder offsets, "
+                "heavier objects).")
+    try:
+        from .feetech import FeetechDriver
+        drv = FeetechDriver(twin.arm, port)
+        return RealBackend(twin, drv, armed=not go), f"Real arm on {port}."
+    except (DriverError, ArmError, ImportError, OSError) as e:
+        return twin, f"Could not use the real arm on {port} ({e}). Using the simulation."
