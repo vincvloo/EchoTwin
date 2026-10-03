@@ -23,7 +23,7 @@ from echotwin.perception import pipeline as PL
 from echotwin.scene import schema, to_twin
 
 from ..features.everyday import listing
-from . import photos
+from . import photos, texture3d
 from .contract import TwinContext
 from .layout_file import doc_to_layout
 
@@ -124,6 +124,13 @@ async def import_photos_auto(frames: list[bytes], pitches: list, ctx: TwinContex
     except (OSError, ValueError) as e:
         print("[pipeline] no scene:", e, file=sys.stderr)
         return await quick("The 3D model found no objects. Using quick mode.")
+    tex = None
+    try:
+        tex = await asyncio.to_thread(texture3d.build, scene, folder)       # the table top, painted from the photos
+    except Exception as e:                                                 # a missing texture never fails the scan
+        print("[pipeline] no table texture:", e, file=sys.stderr)
+    if tex:
+        doc["table_texture"] = tex
     (folder / "twin.json").write_text(json.dumps(doc, indent=1), encoding="utf-8")
     lay = doc_to_layout(doc, folder)
     shot = next(iter(sorted((folder / "objects_scene_review").glob("*.jpg"))), None) or inputs / "000.jpg"
@@ -132,7 +139,8 @@ async def import_photos_auto(frames: list[bytes], pitches: list, ctx: TwinContex
     extra = f", with {len(lay.obstacles)} fixed thing{'s' if len(lay.obstacles) != 1 else ''} around it" \
         if lay.obstacles else ""
     summary = {"id": sid, "mode": "scan3d", "frames": len(frames), "props": movable, "objects": {}, "unsure": [],
-               "thumbs": [], "views": 0, "seconds": 0, "twin": f"/scans/{sid}/twin.jpg", "texture": None,
+               "thumbs": [], "views": 0, "seconds": 0, "twin": f"/scans/{sid}/twin.jpg",
+               "texture": f"/scans/{sid}/{tex}" if tex else None, "calibration": {k: v for k, v in (scene.get("calibration") or {}).items() if k != "cloud_to_map"},
                "obstacles": [o["name"] for o in lay.obstacles], "review": scene.get("review"),
                "greeting": f"I built a 3D model of your table. I can move {listing(movable)}{extra}. "
                            "What should I move?"}

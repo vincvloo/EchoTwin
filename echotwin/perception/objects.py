@@ -225,6 +225,8 @@ def main(argv=None):
     cal = {"source": "marker" if marker else "estimate", "scale": float(scale), "cloud_to_map": affine4(A, b).tolist()}
     if marker:
         cal.update({k: marker[k] for k in ("photos_seen", "photos_total", "spread", "side_units") if k in marker})
+        if "size_m" in marker:
+            cal["marker_size_m"] = marker["size_m"]
     scene_doc = scene_schema.build_scene(objects, meta, name=Path(a.out).name, extra={"calibration": cal})   # what the robot twin reads
     scene_schema.save(scene_doc, f"{a.out}_scene.json")
     draw(gmap, objects, label_img, f"{a.out}_objects.png")

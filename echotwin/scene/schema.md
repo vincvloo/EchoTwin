@@ -38,7 +38,7 @@ Where the metres come from. Written by `objects.py`; a scene without it is still
 
 ```json
 "calibration": {"source": "marker", "scale": 0.0412, "photos_seen": 4, "photos_total": 5, "spread": 0.013,
-                "side_units": 2.43, "cloud_to_map": [[...4 x 4...]]}
+                "side_units": 2.43, "marker_size_m": 0.1, "cloud_to_map": [[...4 x 4...]]}
 ```
 
 | Field | Meaning |

@@ -82,7 +82,7 @@ def estimate(frames: list[dict], size_m: float) -> dict | None:
     n /= np.linalg.norm(n)
     if (np.mean(cams, axis=0) - c.mean(0)) @ n < 0:                # the normal points to where the photos were taken
         n = -n
-    return {"scale": size_m / med, "side_units": med, "photos_seen": len(cs), "spread": spread,
+    return {"scale": size_m / med, "size_m": size_m, "side_units": med, "photos_seen": len(cs), "spread": spread,
             "reliable": len(cs) >= MIN_PHOTOS and spread <= MAX_SPREAD,
             "origin": c.mean(0).tolist(), "x_axis": x.tolist(), "normal": n.tolist()}
 
