@@ -18,9 +18,10 @@ In this order. Each step is only meaningful once the one before it is solid.
       descriptor), a contact grasp with friction and mass instead of gluing the object to the hand, spoken refusals
       (too wide, too thin, out of reach), and every default skill re-checked (`docs/RESULTS.md`). Open: the SO-ARM100's
       single jaw does not hold the full table yet; tall objects are the weak spot.
-- [ ] **PR9 Skills from measurements.** Describe each object by grasp width, height, footprint and estimated weight
-      instead of four shapes (flat, box, cylinder, round), so a skill learned on a mug carries over to similar
-      objects and any detected name works. Needs PR8: only a physical grasp makes these numbers meaningful.
+- [x] **PR9 Skills from measurements.** Each object is described by grip width, height, length and estimated weight;
+      a skill is planned from the demos of similar sizes, so any detected name works. Result (`docs/RESULTS.md`): same
+      success as the shape label, plus the robot asks only when the size is new. Open: learned skills do not beat the tuned
+      defaults, because practice keeps every success at random styles (for PR13).
 - [ ] **PR10 Calibration.** A printed marker (AprilTag) on the table gives a true scale and the camera pose relative to
       the table, so perception is metric (today the scale is a guess from the phone height). Also builds the table
       texture in 3D mode (the cloud loader drops colours today).

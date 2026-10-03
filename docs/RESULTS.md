@@ -98,3 +98,34 @@ What this says:
 
 Limits: one simulator, one built-in arm, boxes of fixed size, 12 trials per cell (one failure is 8 points). Treat it
 as a direction. The numbers will change when PR9 (skills from measurements) and PR12 (closed loop) land.
+
+## Do skills carry over to other sizes? (PR9)
+
+Skills used to be filed under four shape labels. In PR9 they are filed under measurements (grip width, height, length),
+and a new object is planned from the demos of similar-sized objects. `python -m echotwin.robot.skillcheck --transfer`
+tests this: the robot practises with random styles on 12 random objects (box, cylinder, ball; 3 to 7 cm wide, 2 to 12 cm
+tall), keeps what worked, then moves objects it practised on ("seen sizes", 36 moves) and others ("unseen sizes", 72 moves)
+with four ways of choosing the skill. Same object, spot and task in every row.
+
+| Skill chosen by | Seen sizes | Unseen sizes | Hard set: seen | Hard set: unseen |
+|---|---|---|---|---|
+| tuned defaults (nothing learned) | 97 % | 99 % | 89 % | 81 % |
+| shape label (the old way) | 92 % | 99 % | 81 % | 71 % |
+| size class (flat, small, medium, tall) | 92 % | 99 % | 78 % | 71 % |
+| measurements (nearest sizes) | 92 % | 99 % | 78 % | 68 % |
+
+The hard set is only tall (8 to 13 cm), wide (5.5 to 7 cm) boxes and cylinders, where the default skill fails most.
+
+What this says:
+
+- **Measurements match the old shape label; they do not beat it.** On unseen sizes the three learned rows are within noise of
+  each other (72 moves per cell, one move is 1.4 points). The gain of PR9 is not a higher success rate here. It is that the robot now
+  asks when an object is unlike anything it has seen and does not when a similar one is known, whatever the label or the name says
+  (9 of the 72 unseen moves would have been "show me" in the first set).
+- **Learning from practice does not beat the tuned defaults.** Practice tries random styles and keeps every success, so the median
+  of what worked is no better than the hand-tuned default, and a little worse on the hard set. This is a problem of how demos are
+  chosen, not of how they are keyed. Keeping only the best tries, or narrower practice around a good style, is for PR13.
+- **The simulator has little room above the defaults** for objects of this size: 97 to 99 % without learning. A real arm
+  (PR11) will not be so kind, and that is where size-keyed skills should start to matter.
+
+Limits: one seed, 12 objects, random styles; sizes come from the twin and are only as good as the scan.

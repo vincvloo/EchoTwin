@@ -99,7 +99,7 @@ def test_everyday_teach_per_object_type(sim):
     sim._rebuild(_everyday_layout())
     sim.base_layout = sim.world.layout.copy()
     sim.world.settle(20)
-    sim.skills.demos = {}
+    sim.skills.demos = []
     out = []
     sim.emit = out.append
     sim.voice.emit = sim.emit
@@ -114,7 +114,7 @@ def test_everyday_teach_per_object_type(sim):
     _human_demo(sim, sim.task)
     assert sim.mode == "review", said()[-3:]
     sim.keep(True)
-    assert sim.skills.count("flat") == 1
+    assert sim.skills.counts()["flat"] == 1
     # 3. same instruction on the reset table: plan, imagine, do it
     sim.handle_prop_task(MT.parse(text, sim.world.layout.props), text)
     assert decisions()[-1]["kind"] == "do", (decisions()[-1], said()[-2:])
@@ -171,7 +171,7 @@ def test_video_demo_everyday_objects(sim):
     sim._rebuild(lay)
     sim.base_layout = sim.world.layout.copy()
     sim.world.settle(20)
-    sim.skills.demos = {}
+    sim.skills.demos = []
     plan = VE.map_to_twin(res, sim.world.layout.props)
     assert plan and plan["goal"][0] == "near", plan
     out = []
@@ -185,7 +185,7 @@ def test_video_demo_everyday_objects(sim):
     said = [m["text"] for m in out if m.get("t") == "log"]
     assert sim.mode == "review" and sim.review["source"] == "video", said[-2:]
     sim.keep(True)
-    assert sim.skills.count("box") == 1
+    assert sim.skills.counts()["small"] == 1
 
 
 def test_practice_and_stacking(sim):
@@ -193,14 +193,14 @@ def test_practice_and_stacking(sim):
     sim._rebuild(_everyday_layout())
     sim.base_layout = sim.world.layout.copy()
     sim.world.settle(20)
-    sim.skills.demos = {}
+    sim.skills.demos = []
     out = []
     sim.emit = out.append
     sim.voice.emit = sim.emit
     said = lambda: [m["text"] for m in out if m.get("t") == "log"]
     # practice creates demos per kind of object, only successful ones
     sim.practice("flat", per_kind=2, live=False)
-    assert sim.skills.count("flat") >= 1, said()[-1]
+    assert sim.skills.counts()["flat"] >= 1, said()[-1]
     assert "practised" in said()[-1]
     # "on top of" is stacking, not "next to"
     plan = MT.parse("take the chocolate and put it on top of the case", sim.world.layout.props)

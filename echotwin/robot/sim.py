@@ -15,6 +15,7 @@ import numpy as np
 from . import config
 from .dataset import Dataset, score_episode, state_vector
 from .features import prop_skills as PS
+from .features import measure as M
 from .features import tasks as T
 from .router import Intent
 from .scene import Layout
@@ -225,7 +226,7 @@ class Sim:
         self.dataset.add(rv["task"], rv["frames"], rv.get("source", "human"), True)
         self._refit()
         self._rebuild(self.base_layout)
-        self.say(f"Thanks. Now I know how to handle {PS.KIND_LABEL[rv['task']['shape']]}. Try me again.")
+        self.say(f"Thanks. Now I know how to handle {M.CLASS_LABEL[M.size_class(M.from_task(rv['task']))]}. Try me again.")
 
     def _refit(self):
         self.skills.fit(self.dataset.episodes)
@@ -271,17 +272,18 @@ class Sim:
             self.emit({"t": "decision", "kind": "refuse", "task": task, "why": why_not})
             return self.say(f"I can't move the {name}: {why_not}.")
         # 2. do I know how to handle this kind of object?
-        n = self.skills.count(shape)
+        m = task["m"]
+        n = self.skills.count(m)
         if n < PS.MIN_PROP_DEMOS:
-            return self._start_teach(task, reason="new_kind", why=f"no demos with {PS.KIND_LABEL[shape]} yet",
-                                     line=f"I've never moved {PS.KIND_WORDS[shape]}. Can you show me? "
+            return self._start_teach(task, reason="new_kind", why=f"no demos with something this size yet",
+                                     line=f"I've never moved something this size: {M.describe(m)}. Can you show me? "
                                           "Drive me with the keyboard, upload a video, or say practice.")
         # 3. plan from what I learned, then imagine it on a copy of the world
-        skill = self.skills.plan(shape, float(np.linalg.norm(goal - o[:2])))
+        skill = self.skills.plan(m, float(np.linalg.norm(goal - o[:2])))
         wps = PS.waypoints(w, task, skill)
         im = PS.imagine(w, task, wps, skill["speed"])
         u = skill["uncertainty"] + (0 if im["ok"] else 0.8)
-        why = f"{n} demo{'s' if n != 1 else ''} with {PS.KIND_LABEL[shape]} · imagined: {im['text']}"
+        why = f"{n} demo{'s' if n != 1 else ''} of a similar size · imagined: {im['text']}"
         if not im["ok"] or u >= PS.ASK:
             return self._start_teach(task, reason="unsure", why=why,
                                      line=f"I tried it in my head: {im['text']}. Can you show me how?")
@@ -303,9 +305,10 @@ class Sim:
         props = self.base_layout.props
         if len(props) < 2:
             return self.say("I need at least two things on the table to practise.")
-        kinds = [shape] if shape else sorted({p.get("shape", "box") for p in props})
+        classes = [M.size_class(M.measure(self.world, f"prop_{i}")) for i in range(len(props))]
+        kinds = [shape] if shape else [c for c in M.CLASSES if c in classes]
         if prop is not None:
-            kinds = [props[prop].get("shape", "box")]
+            kinds = [classes[prop]]
         self.practice_state = {"kinds": kinds, "k": 0, "kept": 0, "tries": 0, "per": per_kind, "report": [],
                                "cur": None, "prop": prop}
         self.halted = False
@@ -320,7 +323,7 @@ class Sim:
         st, rng = self.practice_state, self.rng
         kind = st["kinds"][st["k"]]
         props = self.base_layout.props
-        movers = [st["prop"]] if st.get("prop") is not None else             [i for i, p in enumerate(props) if p.get("shape", "box") == kind]
+        movers = [st["prop"]] if st.get("prop") is not None else             [i for i in range(len(props)) if M.size_class(M.measure(self.world, f"prop_{i}")) == kind]
         self._rebuild(self.base_layout)
         self.world.settle(10)
         w = self.world
@@ -395,7 +398,7 @@ class Sim:
         task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
                 "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
                 "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
-                "h": float(w.half(me)), "tallest": float(w.tallest()),
+                "h": float(w.half(me)), "tallest": float(w.tallest()), "m": M.measure(w, me),
                 "start": [float(o[0]), float(o[1])]}
         if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
             task["stack"] = True
@@ -414,7 +417,7 @@ class Sim:
         self.replay = {"wps": wps, "i": 0, "speed": 0.15, "task": task, "yaw": self.world.grasp_yaw(task["object"])}
         self.mode, self.authority, self.frames = "replay", "robot", []
         self.emit({"t": "decision", "kind": "teach", "task": task, "reason": "video",
-                   "why": f"learning {PS.KIND_LABEL[task['shape']]} from your video"})
+                   "why": f"learning {M.CLASS_LABEL[M.size_class(task['m'])]} from your video"})
         self.say(heard)
 
     def _replay_done(self):
@@ -537,8 +540,8 @@ class Sim:
                 return (f"About {T.percent_sure(self.plan['uncertainty'])} percent. "
                         f"{self.plan.get('why', '').split(' · ')[0]}.")
             if t:
-                c = self.skills.count(t["shape"])
-                return f"Not sure yet. I have {c} demo{'s' if c != 1 else ''} with {PS.KIND_LABEL[t['shape']]}."
+                c = self.skills.count(M.from_task(t))
+                return f"Not sure yet. I have {c} demo{'s' if c != 1 else ''} of something this size."
             return "Tell me what to move, and I'll tell you how sure I am."
         if n == "learned":
             known = [f"{PS.KIND_LABEL[k]} from {c} demo{'s' if c != 1 else ''}" for k, c in self.skills.counts().items() if c]
