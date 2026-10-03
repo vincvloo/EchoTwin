@@ -2,34 +2,35 @@
 
 Context for Claude Code in this repo. Read `docs/PIPELINE.md` first.
 
-EchoTwin: scan a place with a phone, find its objects, localize a sonar robot in the map, and let a gripper
-robot learn to move the objects. Built for the Physical AI Hackathon (Swiss {ai} Weeks). Owner: Vincent.
-Hardware: phone + laptop (RTX 2050, 4 GB). No physical robot; everything robot-side is simulated.
+EchoTwin: photograph a table with a phone, build a digital twin of it, find its objects, and let a simulated gripper
+robot learn to move them. Built for the Physical AI Hackathon (Swiss {ai} Weeks). Owner: Vincent.
+Hardware: phone + laptop (RTX 2050, 4 GB). No physical robot yet; everything robot-side is simulated.
+Direction: make the simulation physically honest and the skills transferable, so it can later run on a real arm
+(see `docs/TASKS.md`).
 
 ## Layout
-- `echotwin/perception/`: photos/video -> VGGT cloud -> level and scale -> YOLO -> object map. GPU env.
-- `echotwin/navigation/`: sonar model, differential-drive robot, particle filter, demo run.
-- `echotwin/scene/`: shared contract between perception and robot (no heavy dependencies): `schema.py` (scene.json), `catalog.py` (class -> shape / movable), `to_twin.py`.
-- `echotwin/robot/`: MuJoCo twin, server, router, skills, voice, twin import. Robot env.
-- `apps/perception_web` (port 8765), `apps/robot_ui` (dashboard + phone pages, served by the robot server).
-- `data/ out/ runs/ models/ certs/` are local and git-ignored.
+- `echotwin/perception/`: photos/video -> VGGT cloud -> level and scale -> detector -> object map. GPU env.
+- `echotwin/scene/`: the contract between perception and robot (no heavy dependencies): `schema.py` (scene.json),
+  `catalog.py` (class -> shape / movable), `to_twin.py`, `review.py`.
+- `echotwin/robot/`: MuJoCo twin, the server (dashboard, phone page, scans), router, skills, voice. Robot env.
+- `apps/robot_ui/`: the dashboard and the phone page, served by the robot server. This is the only app.
+- `data/ out/ models/ certs/ third_party/` are local and git-ignored.
+- `docs/history/`: removed features (colour blocks, the sonar mobile base) and where to find their code.
 
 ## Commands
 ```bash
-python -m pytest -q tests/perception                           # perception env
+python -m pytest -q tests/perception tests/scene               # perception env
 <robot python> -m pytest -q tests/robot tests/scene            # robot env
-python -m echotwin.perception.sample_scan                      # synthetic flat -> data/
-python -m echotwin.navigation.demo --no-bench                  # map + sonar localization GIF -> out/
-python apps/perception_web/server.py                           # http://127.0.0.1:8765
-<robot python> -m echotwin.robot.server                        # http://localhost:8000
+<robot python> -m echotwin.robot.server                        # http://localhost:8000 (or .\launch.ps1)
+python -m echotwin.perception.detectors                        # which detector will be used
 ```
 Two Python envs: perception (torch, VGGT, ultralytics, scipy, matplotlib) and robot (MuJoCo, FastAPI, OpenCV).
-`.env` holds `PERCEPTION_PY`, `ROBOT_PY` and the API keys (never commit it).
+`.env` holds `PERCEPTION_PY`, `ROBOT_PY` and the API keys (never commit it). Paths in `.env` are relative to the repo.
 
 ## Rules
 - Run the tests before saying something works; add a test for each new behaviour.
 - Keep the shared `echotwin/scene` code free of heavy dependencies.
-- Particle loops stay NumPy-vectorised; stochastic functions take an `np.random.Generator`.
-- When the sensor model changes, re-run the benchmark and update `docs/RESULTS.md`.
+- No machine-specific paths in the repo; paths from `.env` are relative to the repository.
+- One pipeline: the dashboard, the phone and the command line all use `echotwin/perception/pipeline.py`.
 - Plain, direct wording in docs. No em-dashes, no marketing phrasing (owner preference).
 - Work in small PRs: one concern per PR, tests green in both envs.

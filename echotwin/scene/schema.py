@@ -1,6 +1,6 @@
 """scene.json: what perception found, in one file that both halves read. See schema.md.
 
-Numpy-free. Perception writes it (`build_scene`), the twin builder and the sonar side read it.
+Numpy-free. Perception writes it (`build_scene`), the twin builder and the robot read it.
 """
 from __future__ import annotations
 

@@ -1,6 +1,7 @@
-# Starts the perception web app (port 8765) and the robot server (8000 / 8443).
-# Run from the repo root:  .\launch.ps1     Press any key to stop both.
-# Python paths come from .env (PERCEPTION_PY, ROBOT_PY).
+# Starts EchoTwin: one server, one page.
+#   Dashboard (laptop):  http://localhost:8000/        Phone:  https://<laptop-ip>:8443/phone
+# Run from the repo root:  .\launch.ps1     Press any key to stop it.
+# The Python to use comes from .env (ROBOT_PY); the 3D pipeline uses PERCEPTION_PY (see the README).
 
 $root = $PSScriptRoot
 $envFile = Join-Path $root ".env"
@@ -13,25 +14,23 @@ if (Test-Path $envFile) {
 }
 # Paths in .env may be relative to the repository
 function Resolve-Repo($p) { if ([System.IO.Path]::IsPathRooted($p)) { $p } else { Join-Path $root $p } }
-$perceptionPy = if ($env:PERCEPTION_PY) { Resolve-Repo $env:PERCEPTION_PY } else { (Get-Command python).Source }
-$robotPy      = if ($env:ROBOT_PY) { Resolve-Repo $env:ROBOT_PY } else { Join-Path $root ".venv\Scripts\python.exe" }
+$robotPy = if ($env:ROBOT_PY) { Resolve-Repo $env:ROBOT_PY } else { Join-Path $root ".venv-robot\Scripts\python.exe" }
 
 if (-not (Test-Path $robotPy)) {
-    Write-Host "ROBOT_PY not found: $robotPy. Set ROBOT_PY in .env (see .env.example)." -ForegroundColor Red
+    Write-Host "ROBOT_PY not found: $robotPy. Set ROBOT_PY in .env (see .env.example and the README)." -ForegroundColor Red
     exit 1
 }
+if (-not $env:PERCEPTION_PY) {
+    Write-Host "PERCEPTION_PY is not set: scans will use the quick one-photo mode. See the README to enable the 3D model." -ForegroundColor Yellow
+}
 
-$perceptionPort = 8765
-$perceptionCmd = "Set-Location '$root'; `$env:PERCEPTION_PY='$perceptionPy'; & '$perceptionPy' apps/perception_web/server.py $perceptionPort"
-$robotCmd      = "Set-Location '$root'; & '$robotPy' -m echotwin.robot.server"
-$enc = { param($c) [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($c)) }
-$p1 = Start-Process powershell -ArgumentList "-NoExit", "-EncodedCommand", (& $enc $perceptionCmd) -PassThru
-$p2 = Start-Process powershell -ArgumentList "-NoExit", "-EncodedCommand", (& $enc $robotCmd) -PassThru
+$cmd = "Set-Location '$root'; & '$robotPy' -m echotwin.robot.server"
+$bytes = [Text.Encoding]::Unicode.GetBytes($cmd)
+$p = Start-Process powershell -ArgumentList "-NoExit", "-EncodedCommand", ([Convert]::ToBase64String($bytes)) -PassThru
 
 Start-Sleep -Seconds 3
-Start-Process "http://127.0.0.1:$perceptionPort"
 Start-Process "http://localhost:8000"
-Write-Host "  Perception: http://127.0.0.1:$perceptionPort   Robot: http://localhost:8000   Phone: https://<laptop-ip>:8443/phone"
-Write-Host "  Press any key to stop both servers."
+Write-Host "  EchoTwin: http://localhost:8000   Phone: https://<laptop-ip>:8443/phone"
+Write-Host "  Press any key to stop."
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-foreach ($p in $p1, $p2) { try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {} }
+try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}

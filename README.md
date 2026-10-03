@@ -1,23 +1,24 @@
 # EchoTwin
 
-Scan a place with a phone. EchoTwin finds the objects in it, lets a sonar robot localize itself in the map,
-and builds a digital twin where a gripper robot learns to move those objects from a few demonstrations.
+Photograph a table with your phone. EchoTwin builds a digital twin of it, finds the objects, and a simulated gripper
+robot learns to move them from a few demonstrations: "put the glass next to the chocolate".
 
-Built to work with little data: a few photos instead of a LiDAR scan, a few demos instead of a training set,
-cheap ultrasonic sensors instead of a laser.
+Built to work with little data: a few phone photos instead of a LiDAR scan, a few demonstrations instead of a
+training set, any object a detector can name instead of a fixed list.
 
-## The idea in eight steps
+## How it works, in six steps
 
-1. **Capture**: 13 or so phone photos, or one video of the place.
+1. **Capture**: about 10 phone photos or a short video of a table ([how](docs/CAPTURE_GUIDE.md)).
 2. **Reconstruct**: VGGT turns the photos into a 3D point cloud.
-3. **Level and scale**: find the floor, align the walls, set the size from the phone height.
-4. **Detect**: YOLO finds objects in each photo and votes them into 3D.
-5. **Review**: an NVIDIA vision model looks at each object again and corrects names, shapes and false detections (needs a key; skipped without one).
-6. **Scene file**: every object gets a shape and a "can I move it" flag; one `scene.json` that both halves read.
-7. **Use the map**: (a) a sonar robot localizes in the room; (b) a table becomes a digital twin.
-8. **Act and learn**: tell the robot what to move ("put the glass next to the chocolate"). It does it, says it is already done, or asks you to show it once.
+3. **Level and scale**: find the table plane, set the size from the phone height.
+4. **Detect**: an open-vocabulary detector names the objects in each photo and votes them into 3D.
+5. **Review** *(optional)*: an NVIDIA vision model looks at each object again and corrects names, shapes and false
+   detections (needs a key).
+6. **Act and learn**: every object gets a shape and a "can I move it" flag, the table becomes a twin, and you tell the
+   robot what to move. It does it, says it is already done, or asks you to show it once
+   ([how to teach it](docs/TEACHING.md)).
 
-Details: [docs/PIPELINE.md](docs/PIPELINE.md). How to teach the robot (and how to film a demo): [docs/TEACHING.md](docs/TEACHING.md). Other capture methods and why photos are the main one:
+Details: [docs/PIPELINE.md](docs/PIPELINE.md). Other capture methods and why photos are the main one:
 [docs/APPROACHES.md](docs/APPROACHES.md). Roadmap: [docs/TASKS.md](docs/TASKS.md).
 
 ## Setup
@@ -26,7 +27,7 @@ Two Python environments (the GPU stack and the simulator do not need to share on
 `.env` is relative to the repository, so the same setup works on any machine.
 
 ```powershell
-# Perception: reconstruction, detection, maps, sonar localization, perception web app
+# Perception: reconstruction, detection, object map (needs a GPU for the 3D model)
 python -m venv .venv-perception
 .venv-perception\Scripts\pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126   # your CUDA
 .venv-perception\Scripts\pip install -r requirements-perception.txt
@@ -35,7 +36,7 @@ python -m venv .venv-perception
 git clone https://github.com/facebookresearch/vggt third_party/vggt
 .venv-perception\Scripts\pip install -r third_party/vggt/requirements.txt
 
-# Robot: MuJoCo twin, dashboard, phone page
+# Robot: MuJoCo twin, the dashboard and the phone page (this is the app you open)
 uv venv --python 3.12 .venv-robot
 uv pip install --python .venv-robot -r requirements-robot.txt
 
@@ -50,58 +51,58 @@ of detections; `ELEVENLABS_API_KEY` adds a voice.
 ### Detection weights
 
 The detect step uses the best model you have in `models/` (git-ignored). The recommended one is YOLOE with text
-prompts and a public list of 365 names (Objects365); it finds cushions, rugs and coffee tables and names furniture
-correctly (`docs/RESULTS.md`). Fetch it once (about 270 MB from github.com/ultralytics/assets):
+prompts and a public list of 365 names (Objects365); it names furniture and everyday things correctly
+(`docs/RESULTS.md`). Fetch it once (about 270 MB from github.com/ultralytics/assets):
 
 ```powershell
 .venv-perception\Scripts\python -m echotwin.perception.detectors --download
 ```
 
-Without it, the plain YOLO11 model is used and downloaded on first use, as before. To look for other things, put
-one name per line in a text file and set `DETECT_PROMPTS=my_words.txt` in `.env` (or `lvis`, `coco`, `catalog`).
-Small objects on a table are still hard to name for every detector; the review step (`AI_API_KEY`) helps.
+Without it, the plain YOLO11 model is used and downloaded on first use. To look for other things, put one name per
+line in a text file and set `DETECT_PROMPTS=my_words.txt` in `.env` (or `lvis`, `coco`, `catalog`). Small objects on a
+table are still hard to name for every detector; the review step (`AI_API_KEY`) helps.
 
-### Phone scan: 3D or quick
+### 3D or quick scan
 
-With `PERCEPTION_PY` set, a sweep scan from the phone builds a 3D model of the table (VGGT, YOLO, optional review).
-It takes a few minutes on a laptop GPU; the dashboard and the phone show progress and a **Skip, use quick mode**
-button. Without `PERCEPTION_PY`, with fewer than 3 photos, or if a step fails, the quick one-photo method runs
-instead. Set `SCAN_MODE=quick` to always use it.
+With `PERCEPTION_PY` set, a scan builds a 3D model of the table (VGGT, detector, optional review). It takes a few
+minutes on a laptop GPU; the dashboard and the phone show progress and a **Skip, use quick mode** button. Without
+`PERCEPTION_PY`, with fewer than 3 photos, or if a step fails, the quick one-photo method runs instead. Set
+`SCAN_MODE=quick` to always use it.
 
 ## Run
 
 ```powershell
-.\launch.ps1        # perception app http://127.0.0.1:8765, robot dashboard http://localhost:8000
+.\launch.ps1        # one server: dashboard http://localhost:8000, phone https://<laptop-ip>:8443/phone
 ```
+
+Open the dashboard and use the example photos, upload your own photos or a video, or scan with the phone (open the
+phone address on the same Wi-Fi and accept the certificate warning once; HTTPS is needed for camera, tilt and
+microphone). Then tell the robot what to move.
+
+Each step also runs by itself:
 
 | Goal | Command |
 |---|---|
-| Synthetic flat for tests and benchmark | `python -m echotwin.perception.sample_scan` |
-| Map + sonar localization GIF | `python -m echotwin.navigation.demo --no-bench` |
-| Photos -> cloud (VGGT) | `python -m echotwin.perception.reconstruct examples/lounge_photos -o data/lounge.ply --cam-height 1.3` |
-| Cloud -> YOLO labels | `python -m echotwin.perception.detect data/lounge.ply` |
-| Labels -> map + objects | `python -m echotwin.perception.objects data/lounge.ply -o out/lounge --up y --scale 3.333 --floor-offset 0.29` |
-| Review with a vision model (optional, needs `AI_API_KEY`) | `python -m echotwin.perception.review data/lounge.ply out/lounge_scene.json` |
-| Objects -> robot twin | `python -m echotwin.scene.to_twin out/lounge_scene.json --out data/twin.zip` |
-| Robot server | `<robot python> -m echotwin.robot.server` |
-| Tests | `python -m pytest -q tests/perception` and `<robot python> -m pytest -q tests/robot tests/scene` |
-
-Phone: open `https://<laptop-ip>:8443/phone` on the same Wi-Fi and accept the certificate warning once
-(HTTPS is needed for camera, tilt and microphone).
+| Photos -> cloud (VGGT) | `python -m echotwin.perception.reconstruct examples/table_photos -o data/table.ply --cam-height 0.45` |
+| Cloud -> detector labels | `python -m echotwin.perception.detect data/table.ply` |
+| Labels -> objects (`scene.json`) | `python -m echotwin.perception.objects data/table.ply -o out/table --up y --scale <hint> --res 0.01 --min-area 0.0015` |
+| Review with a vision model (optional) | `python -m echotwin.perception.review data/table.ply out/table_scene.json` |
+| Objects -> robot twin | `python -m echotwin.scene.to_twin out/table_scene.json --out data/twin.zip` |
+| Which detector is best? | `python -m echotwin.perception.bench_detect yolo11s-seg.pt yoloe-26s-seg.pt:text=objects365` |
+| Tests | `python -m pytest -q tests/perception tests/scene` and `<robot python> -m pytest -q tests/robot tests/scene` |
 
 ## Where things are
 
 ```
-echotwin/perception/   photos -> cloud -> map -> objects
-echotwin/navigation/   sonar model, robot, particle filter
-echotwin/scene/        contract between perception and robot
+echotwin/perception/   photos -> cloud -> objects, detectors, benchmark
+echotwin/scene/        the contract between perception and the robot (scene.json, class catalog, twin builder)
 echotwin/robot/        digital twin, server, skills, voice
-apps/                  perception web app, robot dashboard and phone pages
-docs/                  pipeline, approaches, capture guide, results, pitch deck
-examples/              lounge and table photos
+apps/robot_ui/         the dashboard and the phone page
+docs/                  pipeline, approaches, capture and teaching guides, results, history
+examples/              table photos
 ```
 
-Sonar results and limits: [docs/RESULTS.md](docs/RESULTS.md). Sources: [docs/RESEARCH.md](docs/RESEARCH.md).
+What was tried and removed (colour blocks, the sonar mobile base): [docs/history](docs/history/README.md).
 
 ## Licence
 

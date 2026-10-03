@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Phone Puppeteer</title>
+<title>EchoTwin</title>
 <style>
 :root{--bg:#0d1115;--card:#161c22;--line:#26303a;--text:#e8edf2;--dim:#8793a0;--accent:#38d39f;--warn:#ffb547;--stop:#ff4d4f;--blue:#4c8dff;--teach:#b18cff}
 *{box-sizing:border-box}
@@ -56,6 +56,18 @@ button.stop{background:var(--stop);border:0;color:white}
 #thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;align-content:start}
 #thumbs img{width:100%;border-radius:6px;aspect-ratio:4/3;object-fit:cover}
 #scanStatus{color:var(--dim);margin:0 0 8px}
+.linkbtn{background:transparent;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:4px 12px;font:600 12px system-ui}
+dialog#capinfo{max-width:min(900px,94vw);width:100%;border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);padding:0}
+dialog#capinfo::backdrop{background:rgba(0,0,0,.6)}
+dialog#capinfo .in{padding:18px 20px 20px;display:flex;flex-direction:column;gap:14px}
+dialog#capinfo h3{margin:0;font-size:20px}
+dialog#capinfo .close{align-self:flex-end;margin-bottom:-8px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.three figure{margin:0;display:flex;flex-direction:column;gap:6px}
+.three img{width:100%;aspect-ratio:1/1;object-fit:contain;background:#fff;border-radius:6px}
+.three figcaption{font-size:12px;color:var(--dim)}
+@media (max-width:640px){.three{grid-template-columns:1fr}}
+#examples{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 #pipe{display:none;margin:0 0 12px}
 #pipeBar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:6px 0}
 #pipeFill{display:block;height:100%;width:0;background:var(--accent);transition:width .6s}
@@ -96,7 +108,7 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
 <body>
 <div id="soundGate"><button class="primary" id="soundBtn">▶ Start (enable sound)</button></div>
 <header>
-  <h1 id="title">Pip <small>Phone Puppeteer v2 · show it, tell it, teach it</small></h1>
+  <h1 id="title">Pip <small>EchoTwin · show it, tell it, teach it</small></h1>
   <span class="pill off" id="conn">offline</span>
   <span class="pill off" id="phonePill">phone —</span>
   <span class="pill off" id="aiPill">AI off</span>
@@ -153,7 +165,13 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
     <h2>1 · Check your photos</h2>
     <div id="drop"><b>Drop photos here</b> or <button class="primary" id="checkPick">Choose photos…</button>
       <input type="file" id="checkFiles" accept="image/*" multiple hidden>
-      <div style="color:var(--dim);font-size:12px;margin-top:6px">Everyday things on any table (glass, chocolate, case…). Each photo is checked; untick bad ones, then build. The sharpest photo is used.</div></div>
+      <div style="color:var(--dim);font-size:12px;margin-top:6px">Everyday things on any table (glass, chocolate, case…). Each photo is checked; untick bad ones, then build. With the 3D pipeline set up it uses all of them (a few minutes, you can skip); otherwise the sharpest one.</div>
+      <div id="examples"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px">
+        <label><button id="videoBtn">Upload a video</button><input type="file" id="videoFile" accept="video/*" hidden></label>
+        <button class="linkbtn" id="capinfoBtn" type="button" aria-haspopup="dialog">ⓘ Photos, Scaniverse or LiDAR?</button>
+        <a href="/docs/capture" target="_blank" rel="noopener" style="font-size:13px;color:var(--dim)">How to take the photos</a>
+      </div></div>
     <div id="checkGrid"></div>
     <div id="checkBar" style="display:none;margin-top:12px;display:none;align-items:center;gap:12px">
       <button class="primary" id="checkBuild">Build twin</button><span id="checkSummary" style="color:var(--dim)"></span>
@@ -356,6 +374,26 @@ function renderScan(s) {
   }
 }
 
+// ---------- examples, video, capture comparison ----------
+fetch('/api/examples').then(r => r.json()).then(list => {
+  $('#examples').innerHTML = list.map(e => `<button data-ex="${esc(e.id)}" title="${esc(e.what)}">Try the example: ${esc(e.title)} (${e.photos} photos)</button>`).join('');
+  $('#examples').querySelectorAll('button').forEach(b => b.onclick = async () => {
+    $('#scanStatus').textContent = 'Scanning the example photos…';
+    await fetch('/api/examples/' + b.dataset.ex, { method: 'POST' });
+    $('#scanStatus').scrollIntoView({ behavior: 'smooth' });
+  });
+}).catch(() => {});
+$('#videoBtn').onclick = () => $('#videoFile').click();
+$('#videoFile').onchange = async () => {
+  const f = $('#videoFile').files[0]; if (!f) return;
+  const fd = new FormData(); fd.append('files', f);
+  $('#scanStatus').textContent = 'Reading the video…'; $('#scanStatus').scrollIntoView({ behavior: 'smooth' });
+  await fetch('/api/scan', { method: 'POST', body: fd }); $('#videoFile').value = '';
+};
+$('#capinfoBtn').onclick = () => $('#capinfo').showModal();
+$('#capinfoClose').onclick = () => $('#capinfo').close();
+$('#capinfo').addEventListener('click', e => { if (e.target === $('#capinfo')) $('#capinfo').close(); });
+
 // ---------- dataset ----------
 let lastStats = null;
 function renderStats(s) {
@@ -528,5 +566,30 @@ setInterval(() => {
 })();
 connect();
 </script>
+<dialog id="capinfo" aria-labelledby="capinfoTitle">
+  <div class="in">
+    <button class="linkbtn close" type="button" id="capinfoClose">Close</button>
+    <h3 id="capinfoTitle">Three ways to capture a place</h3>
+    <p style="color:var(--dim);margin:0">EchoTwin works from photos or a video, because every phone can do that. A Scaniverse scan or a LiDAR mesh is
+      more accurate and already metric, but needs an app, or a device with a LiDAR sensor, which costs more. We tested all three.</p>
+    <div class="three">
+      <figure><img src="/img/map_lounge.png" alt="Floor plan of a stage built from 13 photos"><figcaption>13 photos + VGGT · cleanest plan</figcaption></figure>
+      <figure><img src="/img/map_splat.png" alt="Floor plan of the same stage built from a Scaniverse scan"><figcaption>Scaniverse scan of the same stage · metric, noisier</figcaption></figure>
+      <figure><img src="/img/map_home.png" alt="Floor plan of a furnished apartment built from an iPad LiDAR scan"><figcaption>LiDAR mesh of an apartment · 7.0 × 6.2 m</figcaption></figure>
+    </div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th></th><th>Photos / video + VGGT</th><th>Scaniverse (phone app)</th><th>LiDAR (iPad mesh)</th></tr></thead>
+      <tbody>
+        <tr><td>Needs</td><td>Any phone camera</td><td>A phone with the app</td><td>A device with a LiDAR sensor</td></tr>
+        <tr><td>Scale</td><td>Estimated from the phone height; stage height within about 5 % of the Scaniverse scan</td><td>Metric</td><td>Metric (table top 0.75 m, ceiling 2.25 to 2.30 m)</td></tr>
+        <tr><td>Names the objects</td><td>Yes: a detector, then a vision-model review</td><td>No</td><td>No</td></tr>
+        <tr><td>Plan in our test</td><td>Cleanest: armchairs, sofa, lamps</td><td>Works, noisier</td><td>93 % of the floor, table legs visible</td></tr>
+        <tr><td>Processing here</td><td>About 2 to 3 min on a laptop GPU</td><td>About 30 s</td><td>About 40 s</td></tr>
+      </tbody>
+    </table></div>
+    <p style="color:var(--dim);margin:0;font-size:13px">Small things are the weak spot of photos: the reconstructed table is flat to only 2 to 3 cm, so objects
+      under about 5 cm can vanish. Scaniverse and LiDAR data are not part of this repository (the LiDAR scan is licensed for non-commercial use).</p>
+  </div>
+</dialog>
 </body>
 </html>

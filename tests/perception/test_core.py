@@ -41,7 +41,7 @@ def test_points_to_grid_marks_wall_and_ignores_high_shelf():
     g = points_to_grid(np.vstack([floor, wall, shelf]), res=0.05)
     r, c = g.to_cell(np.array([2.0, 0.75]), np.array([1.5, 1.5]))
     assert g.occ[r[0], c[0]]          # wall is an obstacle
-    assert not g.occ[r[1], c[1]]      # shelf at 1 m is above the sonar band
+    assert not g.occ[r[1], c[1]]      # shelf at 1 m is above the height band
 
 
 def test_align_walls_undoes_yaw():
