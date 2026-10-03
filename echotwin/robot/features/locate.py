@@ -50,6 +50,8 @@ def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH)
         if area < MIN_AREA_FRACTION * size_px ** 2:
             continue
         dd = float(np.hypot(cents[i][0] - ex, cents[i][1] - ey))
+        if dd > 1.6 * size_px + 8:                              # too far from where it should be: something else
+            continue
         s = area / (1.0 + (dd / max(size_px, 1.0)) ** 2)        # big and close wins
         if s > score:
             best, score = i, s

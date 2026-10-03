@@ -25,6 +25,13 @@ class TruthObserver:
         return self.plant.tilt(name)
 
 
+def mock_camera(driver) -> "CameraObserver":
+    """A top-down camera over the mock arm's own world."""
+    from .observe import CameraObserver, RenderSource
+    src = RenderSource(lambda: driver.plant)
+    return CameraObserver(src, lambda: src.plane(driver.plant))
+
+
 class RealBackend:
     """An arm moved by servos, with the simulation running beside it as its twin.
 
@@ -35,8 +42,11 @@ class RealBackend:
     """
     name = "real"
 
-    def __init__(self, twin: World, driver: Driver, observer=None, speed: float = REAL_SPEED, armed: bool = True):
-        self.twin, self.driver, self.observer, self.speed = twin, driver, observer, speed
+    def __init__(self, twin: World, driver: Driver, observer=None, speed: float = REAL_SPEED, armed: bool = True,
+                 camera=None):
+        """`observer`: a source of object truth (the mock's own world: for judging in tests). `camera`: a CameraObserver the
+        robot looks through (`observe`); without one it can only believe the twin."""
+        self.twin, self.driver, self.observer, self.camera, self.speed = twin, driver, observer, camera, speed
         self.stopped, self.armed = False, armed
         self.q_meas, self.closure, self._closure_prev = np.zeros(5), 0.0, 0.0
         driver.connect(twin.hand.q)
@@ -107,6 +117,16 @@ class RealBackend:
         self.build(layout or self.twin.layout)
 
     # ---------- the scene
+    def observe(self, name):
+        """Look at an object and move the twin's belief to where it is seen. The position, or None if it is not seen."""
+        tw = self.twin
+        if self.camera is None:
+            return self.obj_pos(name)[:2].copy()
+        est = self.camera.observe(name, tw.obj_pos(name)[:2], 2 * tw.radius(name), tw.half(name))
+        if est is not None and not tw.hand.held:
+            tw.set_obj_pose(name, est)
+        return est
+
     def obj_pos(self, name, d=None):
         if d is None and self.observer is not None:
             return self.observer.obj_pos(name)

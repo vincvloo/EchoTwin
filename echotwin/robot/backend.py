@@ -31,7 +31,7 @@ import numpy as np
 
 CONTRACT = ("step", "hand_pos", "grip_settled", "go_rest", "stop", "resume", "close", "obj_pos", "tilt", "things", "half",
             "radius", "tallest", "reachable", "can_grasp", "refusal", "grasp_offset", "grasp_yaw", "carry_height",
-            "workspace_sample", "clone", "settle", "arm_ready")
+            "workspace_sample", "clone", "settle", "arm_ready", "observe", "observe_pose", "set_obj_pose")
 
 
 @runtime_checkable
@@ -50,6 +50,9 @@ class Backend(Protocol):
     def close(self) -> None: ...
     def arm_ready(self) -> bool: ...
     def obj_pos(self, name: str, d=None) -> np.ndarray: ...
+    def observe(self, name: str): ...
+    def observe_pose(self) -> np.ndarray: ...
+    def set_obj_pose(self, name: str, xy, d=None) -> None: ...
     def tilt(self, name: str, d=None) -> float: ...
     def things(self) -> list: ...
     def half(self, name: str) -> float: ...
@@ -82,7 +85,7 @@ def make(layout=None, env=None) -> tuple["Backend", str]:
     import os
     from .arm import ArmError
     from .drivers import DriverError, MockDriver
-    from .real import RealBackend, TruthObserver
+    from .real import RealBackend, mock_camera
     from .world import World
     env = os.environ if env is None else env
     kind = (env.get("BACKEND") or "sim").strip().lower()
@@ -95,7 +98,7 @@ def make(layout=None, env=None) -> tuple["Backend", str]:
     go = (env.get("REAL_REQUIRE_GO") or "1").strip() != "0"
     if not port:
         drv = MockDriver(twin.layout, twin.arm)
-        return (RealBackend(twin, drv, observer=TruthObserver(drv.plant), armed=True),
+        return (RealBackend(twin, drv, camera=mock_camera(drv), armed=True),
                 "No REAL_PORT: running the mock arm (a simulated arm that is not the simulation: lag, encoder offsets, "
                 "heavier objects).")
     try:
