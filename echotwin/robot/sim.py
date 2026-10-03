@@ -15,6 +15,7 @@ import numpy as np
 from . import config
 from .dataset import Dataset, score_episode, state_vector
 from .features import prop_skills as PS
+from .features.measure import measure
 from .features import tasks as T
 from .router import Intent
 from .scene import Layout
@@ -395,7 +396,7 @@ class Sim:
         task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
                 "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
                 "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
-                "h": float(w.half(me)), "tallest": float(w.tallest()),
+                "h": float(w.half(me)), "tallest": float(w.tallest()), "m": measure(w, me),
                 "start": [float(o[0]), float(o[1])]}
         if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
             task["stack"] = True

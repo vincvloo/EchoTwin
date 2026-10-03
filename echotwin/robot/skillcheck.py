@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from .features import move_things as MT
+from .features.measure import measure
 from .features import prop_skills as PS
 from .scene import Layout
 from .world import CTRL_DT, World
@@ -68,6 +69,7 @@ def make_task(w: World, plan: dict, heard: str) -> dict:
     shape = pr.get("shape", "box")
     task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape, "name": pr["name"],
             "instruction": heard, "goal": [float(goal[0]), float(goal[1])], "ref": "prop_1" if plan["goal"][0] == "near" else None,
+            "m": measure(w, me),
             "h": float(w.half(me)), "tallest": float(w.tallest() if hasattr(w, "tallest") else max(2 * w.half(n) for n in w.things())),
             "start": [float(o[0]), float(o[1])]}
     if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
