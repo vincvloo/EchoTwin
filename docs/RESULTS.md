@@ -129,3 +129,37 @@ What this says:
   (PR11) will not be so kind, and that is where size-keyed skills should start to matter.
 
 Limits: one seed, 12 objects, random styles; sizes come from the twin and are only as good as the scan.
+
+## What do the skills lose when the arm is not the simulation? (PR11)
+
+There is no real arm yet, so the "real" back-end was run against a **mock arm**: a second MuJoCo world with objects 1.4 times
+heavier, pads with 80 % of the friction, servos that lag behind their targets (45 % of the gap per tick), encoders that read a
+little off (about 0.7 degrees per joint, fixed) and noisy (0.1 degree), and half the tool speed. The skills plan and imagine in the
+simulation (the twin), the mock arm does the move, and the result is judged on the mock's own objects (a perfect camera).
+`python -m echotwin.robot.skillcheck --backend both --trials 12`, same objects and spots in both columns:
+
+| Shape | Task | sim | mock arm | gap |
+|---|---|---|---|---|
+| flat | next to | 100 % | 100 % | 0 |
+| flat | to the left | 100 % | 100 % | 0 |
+| flat | on top of | 100 % | 100 % | 0 |
+| box | next to | 100 % | 100 % | 0 |
+| box | to the left | 100 % | 100 % | 0 |
+| box | on top of | 100 % | 100 % | 0 |
+| cylinder | next to | 83 % | 67 % | -17 |
+| cylinder | to the left | 92 % | 58 % | -33 |
+| cylinder | on top of | 67 % | 25 % | -42 |
+| ball | next to | 100 % | 100 % | 0 |
+| ball | to the left | 100 % | 100 % | 0 |
+| ball | on top of | 92 % | 92 % | 0 |
+| **all** | | **94 %** | **87 %** | **-8** |
+
+What this says:
+
+- **The easy objects do not care.** Flat things, boxes and balls hold their success under lag, offsets and heavier objects, because
+  the skills close the loop on the measured tool position and the grasp has some tolerance.
+- **The tall cylinder is where reality bites.** It is gripped low, swings when the arm turns, and heavier plus less grip makes it tip
+  or slide: stacking it drops from 67 % to 25 %. A real arm will probably show the same weak spot first.
+- **This is a stress test, not a prediction.** The mock is as hard as its parameters; real servos, real friction and a real camera
+  will differ. The numbers say which skills to watch first, and give the comparison a place to live: `python -m echotwin.robot.runlog`
+  prints the success rate per back-end from `data/robot/runs.jsonl`, which every executed move appends to.

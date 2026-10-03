@@ -78,8 +78,9 @@ def make_task(w: World, plan: dict, heard: str) -> dict:
     return task
 
 
-def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None) -> dict:
-    """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill."""
+def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim") -> dict:
+    """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill;
+    `backend` is sim (the simulation is the robot) or mock (the mock arm: a perturbed second world, judged by its own objects)."""
     k = _scale()
     probe = None
     try:
@@ -100,6 +101,12 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
         goal = MT.goal_xy(w, plan)
         if not w.refusal("prop_0", goal):
             break
+    if backend == "mock":                       # the same move, on an arm that is not the simulation
+        from .drivers import MockDriver
+        from .real import RealBackend, TruthObserver
+        drv = MockDriver(w.layout, w.arm)
+        w = RealBackend(w, drv, observer=TruthObserver(drv.plant))
+        w.settle(10)
     task = make_task(w, plan, f"put the mover {task_name}")
     style = skill_fn(task) if skill_fn else dict(PS.DEFAULTS)
     wps = PS.waypoints(w, task, style)
@@ -108,7 +115,8 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     if hasattr(w, "grasp_yaw"):
         r["yaw"] = w.grasp_yaw(task["object"])
     ticks = 0
-    while ticks < MAX_TICKS:
+    limit = MAX_TICKS * (2 if backend == "mock" else 1)       # the real arm moves at half speed
+    while ticks < limit:
         a = PS.waypoint_action(w, r)
         if a is None:
             break
@@ -118,7 +126,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     res = PS.outcome(w, task, before)
     ok = bool(res["ok"] and PS.goal_met(w, task))
     why = "" if ok else (res["text"] if not res["ok"] else "it did not end where it should")
-    if ticks >= MAX_TICKS:
+    if ticks >= limit:
         why, ok = "ran out of time", False
     return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT, "style": style, "task": task}
 
@@ -131,13 +139,13 @@ def reason_key(why: str) -> str:
     return why[:40] or "ok"
 
 
-def run(trials: int, shapes, tasks, seed: int = 7) -> dict:
+def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim") -> dict:
     rng = np.random.default_rng(seed)
-    out = {"scale": _scale(), "trials": trials, "cells": {}}
+    out = {"scale": _scale(), "trials": trials, "backend": backend, "cells": {}}
     for s in shapes:
         for t in tasks:
             t0 = time.time()
-            rs = [trial(s, t, rng) for _ in range(trials)]
+            rs = [trial(s, t, rng, backend=backend) for _ in range(trials)]
             wins = [r for r in rs if r["ok"]]
             out["cells"][f"{s} | {t}"] = {
                 "success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
@@ -234,6 +242,18 @@ def _can(obj, probe: World) -> bool:
     return World(lay).can_grasp("prop_0")[0]
 
 
+def gap_table(sim: dict, mock: dict) -> str:
+    """Success per cell on the simulation and on the mock arm, side by side."""
+    lines = ["| Shape | Task | sim | mock arm | gap |", "|---|---|---|---|---|"]
+    for k, a in sim["cells"].items():
+        b = mock["cells"][k]
+        s, t = k.split(" | ")
+        lines.append(f"| {s} | {t} | {a['success']:.0%} | {b['success']:.0%} | {(b['success'] - a['success']) * 100:+.0f} |")
+    ma, mb = (np.mean([c["success"] for c in r["cells"].values()]) for r in (sim, mock))
+    lines.append(f"| **all** | | **{ma:.0%}** | **{mb:.0%}** | **{(mb - ma) * 100:+.0f}** |")
+    return "\n".join(lines)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trials", type=int, default=6)
@@ -241,6 +261,8 @@ def main(argv=None):
     ap.add_argument("--tasks", nargs="+", default=list(TASKS), choices=list(TASKS))
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="out/skillcheck.json")
+    ap.add_argument("--backend", choices=["sim", "mock", "both"], default="sim",
+                    help="mock: the mock arm (lag, encoder offsets, heavier objects); both: run each and show the gap")
     ap.add_argument("--transfer", action="store_true", help="do skills learned on some sizes work on other sizes?")
     ap.add_argument("--hard", action="store_true", help="with --transfer: only tall, wide things")
     ap.add_argument("--objects", type=int, default=8, help="with --transfer: objects to practise on")
@@ -252,7 +274,13 @@ def main(argv=None):
         Path("out").mkdir(exist_ok=True)
         Path("out/skillcheck_transfer.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         return 0
-    res = run(a.trials, a.shapes, a.tasks, a.seed)
+    if a.backend == "both":
+        res = {b: run(a.trials, a.shapes, a.tasks, a.seed, b) for b in ("sim", "mock")}
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+        Path("out/skillcheck_backends.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+        print("\n" + gap_table(res["sim"], res["mock"]))
+        return 0
+    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("\n" + table(res))

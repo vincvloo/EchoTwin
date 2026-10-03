@@ -14,6 +14,7 @@ import numpy as np
 
 from . import backend as BK
 from . import config
+from . import runlog
 from .dataset import Dataset, score_episode, state_vector
 from .features import prop_skills as PS
 from .features import measure as M
@@ -431,6 +432,7 @@ class Sim:
             t = r["task"]
             self.mode, self.authority, self.ghost = "idle", "human", None
             res = PS.outcome(w, t, r["before"])
+            runlog.record(w.name, t, res, self.dataset.root.parent / "runs.jsonl")
             self.robot_runs["runs"] += 1
             if res["ok"]:
                 self.robot_runs["success"] += 1
