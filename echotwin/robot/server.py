@@ -7,6 +7,7 @@ import base64
 import datetime
 import ipaddress
 import json
+import os
 import pathlib
 import re
 import socket
@@ -76,7 +77,7 @@ async def phone():
     return FileResponse(config.STATIC / "phone.html")
 
 
-GUIDES = {"teaching": ("TEACHING.md", "Teaching the robot")}
+GUIDES = {"teaching": ("TEACHING.md", "Teaching the robot"), "capture": ("CAPTURE_GUIDE.md", "Taking the photos")}
 
 
 @app.get("/docs/{name}")
@@ -131,6 +132,7 @@ async def voice_file(name: str):
 
 
 app.mount("/scans", StaticFiles(directory=config.SCANS), name="scans")
+app.mount("/img", StaticFiles(directory=config.STATIC / "img"), name="img")     # pictures used by the pages
 
 
 check_store: dict[str, bytes] = {}
@@ -169,10 +171,48 @@ async def build_from_checked(body: dict):
     return JSONResponse({"ok": True, "frames": len(frames)})
 
 
+VIDEO_EXT = (".mp4", ".mov", ".m4v", ".avi", ".webm")
+
+
 @app.post("/api/scan")
 async def upload_scan(files: list[UploadFile] = File(...)):
-    """Fallback: upload photos from the laptop (webcam shots or files)."""
-    frames = [await f.read() for f in files]
+    """Photos from the laptop, or one video: its frames are used like the photos of a sweep scan."""
+    blobs = [(f.filename or "", f.content_type or "", await f.read()) for f in files]
+    if len(blobs) == 1 and (blobs[0][1].startswith("video/") or blobs[0][0].lower().endswith(VIDEO_EXT)):
+        from .features.imageutil import frames_from_video
+        n = int(os.environ.get("SCAN_FRAMES") or 12)
+        frames = await asyncio.to_thread(frames_from_video, blobs[0][2], n)
+        if len(frames) < 3:
+            sim.submit(sim.say, "I couldn't read enough frames from that video.")
+            return JSONResponse({"ok": False, "error": "unreadable video"})
+    else:
+        frames = [b[2] for b in blobs]
+    asyncio.ensure_future(process_scan(frames))
+    return JSONResponse({"ok": True, "frames": len(frames)})
+
+
+def _examples() -> list[dict]:
+    f = config.ROOT / "examples" / "examples.json"
+    items = json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+    for e in items:
+        photos = sorted(p for p in (config.ROOT / "examples" / e["folder"]).glob("*") if p.suffix.lower() in (".jpg", ".jpeg", ".png"))
+        e["photos"] = len(photos)
+    return [e for e in items if e["photos"]]
+
+
+@app.get("/api/examples")
+async def examples():
+    return JSONResponse([{k: e[k] for k in ("id", "title", "what", "photos")} for e in _examples()])
+
+
+@app.post("/api/examples/{name}")
+async def run_example(name: str):
+    """Scan the photos of an example, exactly as if they came from the phone."""
+    ex = next((e for e in _examples() if e["id"] == name), None)
+    if ex is None:
+        return JSONResponse({"ok": False, "error": "no such example"}, status_code=404)
+    folder = config.ROOT / "examples" / ex["folder"]
+    frames = [p.read_bytes() for p in sorted(folder.glob("*")) if p.suffix.lower() in (".jpg", ".jpeg", ".png")]
     asyncio.ensure_future(process_scan(frames))
     return JSONResponse({"ok": True, "frames": len(frames)})
 

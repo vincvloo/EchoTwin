@@ -51,7 +51,7 @@ def _runner(tmp_path, results=None, scene=TABLE):
         calls.append(argv)
         state, out = (results or {}).get(i, ("done", ""))
         if i == 0 and state == "done":
-            out = "wrote cloud\ncamera height ... --scale 0.512  (then fix with --ref)\n"
+            out = "wrote cloud\ncamera height | scale hint if you held the phone at 0.45 m: --scale 0.512\n"
         if i == 2 and state == "done" and scene is not None:
             _scene(tmp_path, scene)
         return state, out

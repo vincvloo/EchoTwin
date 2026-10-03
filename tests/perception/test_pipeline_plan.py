@@ -20,7 +20,7 @@ def test_plan_without_review_and_for_a_room():
 
 
 def test_scale_is_read_from_the_reconstruction_output_and_filled_in():
-    out = "camera height above floor: 0.88 units | scale hint ...: --scale 0.512  (then fix with --ref)\n"
+    out = "camera height above floor: 0.88 units | scale hint if you held the phone at 0.45 m: --scale 0.512\n"
     assert PL.find_scale(out) == 0.512 and PL.find_scale("nothing here") is None
     assert PL.fill(["a", "{scale}"], 0.512) == ["a", "0.5120"]
     assert PL.fill(["a", "{scale}"], None) == ["a", "1.0"]

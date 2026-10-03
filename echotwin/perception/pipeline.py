@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SCALE_RE = re.compile(r"--scale ([0-9.]+)\s+\(then fix")
+SCALE_RE = re.compile(r"scale hint[^\n]*?--scale ([0-9.]+)")
 
 
 @dataclass

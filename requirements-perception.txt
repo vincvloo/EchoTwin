@@ -1,4 +1,4 @@
-# GPU environment: reconstruction (VGGT), detection (YOLO), maps, sonar localization, perception web app.
+# GPU environment: reconstruction (VGGT), detection (YOLO / YOLOE), object map.
 # Install torch for your CUDA first (https://pytorch.org), then:
 numpy>=1.24
 scipy>=1.10

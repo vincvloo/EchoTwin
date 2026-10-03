@@ -9,13 +9,13 @@ fits a 4 GB GPU), unproject confident depth pixels into one cloud, then rotate i
 (glTF / ARCore convention). Up comes from the cameras: a handheld phone has little roll, so the
 camera x axes are horizontal and 'up' is the direction most perpendicular to all of them.
 
-The result has NO metric scale. Convert it with a scale guess first, then fix it with --ref.
-Always pass --up y: the cloud is already upright, and auto-detection can pick a wall when little
+The result has NO metric scale: the hint printed at the end assumes the phone height you pass with --cam-height.
+Always pass --up y to the next step: the cloud is already upright, and auto-detection can pick a wall when little
 floor is visible.
-    python -m echotwin.perception.mapping data/room_video.ply -o out/room --up y --scale <hint printed below>
+    python -m echotwin.perception.objects data/room.ply -o out/room --up y --scale <hint printed below>
 
 On the RTX 2050 (4 GB): 8 frames ~1.5 min, 20 frames ~5.5 min (peak 4.8 GB spills into shared RAM).
-Film with the floor in view (phone low, pointing down), otherwise the map has no free space.
+Film with the floor (or the table top) in view, phone pointing down.
 """
 import argparse
 import sys
@@ -193,9 +193,9 @@ def main(argv=None):
     ext = np.ptp(pts, axis=0)
     print(f"wrote {a.out}: {len(pts):,} points, extent {ext[0]:.2f} x {ext[1]:.2f} x {ext[2]:.2f} (VGGT units, Y up)")
     print(f"camera height above floor: {cam_h:.3f} units | scale hint if you held the phone at "
-          f"{a.cam_height:.2f} m: --scale {a.cam_height / max(cam_h, 1e-6):.3f}  (then fix with --ref)")
-    print(f"next: python -m echotwin.perception.mapping {a.out} -o out/{Path(a.out).stem} --up y "
-          f"--scale {a.cam_height / max(cam_h, 1e-6):.3f}")
+          f"{a.cam_height:.2f} m: --scale {a.cam_height / max(cam_h, 1e-6):.3f}")
+    print(f"next: python -m echotwin.perception.detect {a.out}, then python -m echotwin.perception.objects {a.out} "
+          f"-o out/{Path(a.out).stem} --up y --scale {a.cam_height / max(cam_h, 1e-6):.3f}")
     print(f"total {time.time()-t0:.0f} s")
 
 

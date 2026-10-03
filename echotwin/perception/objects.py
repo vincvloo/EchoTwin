@@ -1,15 +1,11 @@
-"""Occupancy map + object layer from a labelled cloud (video_to_ply.py -> label_objects.py -> this).
+"""Objects of a scene from a labelled cloud (reconstruct.py -> detect.py -> this).
 
-    python -m echotwin.perception.objects data/lounge_vggt.ply -o out/lounge_objects --up y --scale 3.333 --floor-offset 0.29
+    python -m echotwin.perception.objects data/table.ply -o out/table --up y --scale 0.5 --res 0.01 --min-area 0.0015
 
-Writes <out>.png/.yaml (the map, same as mesh_to_grid), <out>_scene.json (the scene file the robot twin
-reads, see echotwin/scene/schema.md), <out>_objects.json ("map": grid origin and
-size; "objects": one entry per object with class, centre and size in metres in the map frame,
-height, how many photos saw it) and
-<out>_objects.png (map with the objects drawn on it).
-
-The object layer is for people and planning, not for the particle filter: sonars cannot tell a
-chair from a wall, so localisation still uses the plain occupancy map.
+Writes <out>_scene.json (the scene file the robot twin reads, see echotwin/scene/schema.md), <out>_objects.json
+("map": grid origin and size; "objects": one entry per object with class, centre and size in metres in the floor
+plan frame, height, how many photos saw it), <out>.png (the floor plan) and <out>_objects.png (the floor plan with the
+objects drawn on it).
 """
 import argparse
 import json
