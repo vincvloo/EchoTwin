@@ -5,7 +5,7 @@ The robot works on a table, not a room. So this picks a table-sized window of th
   2. the densest cluster of small movable things.
 Everything movable inside the window becomes an object the gripper can move, real size and real place.
 Furniture that reaches into the window (a chair next to the table, a big plant) becomes a fixed obstacle.
-The window is scaled to the sim table the same way the one-photo importer does (`sim_scale`).
+The window keeps its real size (`table_cm` in the twin file); nothing is scaled.
 
     python -m echotwin.scene.to_twin out/lounge_objects_scene.json --out data/lounge_twin.zip
 """
@@ -19,8 +19,7 @@ from pathlib import Path
 
 from . import catalog, schema
 
-# Sim table size in sim metres. Must equal 2 * TABLE_HALF in echotwin/robot/scene.py (a test checks this).
-TABLE_SIM = (1.188, 0.84)
+TABLE_ASPECT = 1188 / 840      # width / height of the table texture; the same value as in echotwin/robot/scene.py
 CLUSTER_RADIUS = 0.8           # metres: small things this close belong to one working area
 
 
@@ -60,16 +59,15 @@ def _dist(a: dict, b: dict) -> float:
 
 
 def window_size(items: list[dict], surface: dict | None) -> tuple[float, float]:
-    """Real metres covered by the sim table (same margins as the one-photo importer)."""
-    tw, th = TABLE_SIM
+    """Real metres of the table window (same margins as the one-photo importer)."""
     xs = [i["x"] for i in items]
     ys = [i["y"] for i in items]
     span_x = max(0.5, (max(xs) - min(xs)) * 1.6 + 0.15)
     span_y = max(0.35, (max(ys) - min(ys)) * 1.6 + 0.15)
     if surface is not None:
         span_x, span_y = max(span_x, surface["size_x"]), max(span_y, surface["size_y"])
-    real_w = max(span_x, span_y * tw / th)
-    return real_w, real_w * th / tw
+    real_w = max(span_x, span_y * TABLE_ASPECT)
+    return real_w, real_w / TABLE_ASPECT
 
 
 def scene_to_twin(scene: dict, name: str | None = None) -> dict:
@@ -77,7 +75,6 @@ def scene_to_twin(scene: dict, name: str | None = None) -> dict:
     schema.validate(scene)
     (cx, cy), items, surface = pick_window(scene)
     real_w, real_h = window_size(items, surface)
-    sim_scale = TABLE_SIM[0] / real_w
     props, obstacles, left_out = [], [], 0
     for o in scene["objects"]:
         if o["surface"] and (o is surface or _holds(o, items)):
@@ -104,7 +101,8 @@ def scene_to_twin(scene: dict, name: str | None = None) -> dict:
             entry["shape"] = "box"                     # a clipped cylinder is not a cylinder any more
         (props if o["movable"] else obstacles).append(entry)
     return {"format": "phone-puppeteer-twin", "version": 1, "name": name or scene.get("name", "EchoTwin scene"),
-            "sim_scale": round(sim_scale, 4), "objects": props, "obstacles": obstacles, "scene": [],
+            "sim_scale": 1.0, "table_cm": [round(real_w * 100, 1), round(real_h * 100, 1)],
+            "objects": props, "obstacles": obstacles, "scene": [],
             "window_m": [round(real_w, 3), round(real_h, 3)], "left_out": left_out}
 
 

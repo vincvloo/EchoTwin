@@ -2,11 +2,11 @@
 
 A twin file is a .zip holding twin.json plus the images/meshes it refers to (or just a twin.json).
 All positions and sizes are REAL centimetres on the table, origin at the table centre, x to the right,
-y away from the viewer. The sim is drawn "sim_scale" times bigger (sim metres per real metre).
+y away from the viewer. Sim metres are real metres: an older "sim_scale" in a file is ignored.
 
 {
   "format": "phone-puppeteer-twin", "version": 1, "name": "DARE table",
-  "sim_scale": 2.0,
+  "table_cm": [80, 60],                                  # optional: the table (default 80 x 60, or what the objects need)
   "table_texture": "table.png",                         # optional top-down photo of the table
   "objects": [                                           # everyday objects the robot can move
     {"name": "chocolate box", "shape": "flat",            # flat | box | cylinder | round
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..scene import Layout
+from ..scene import DEFAULT_TABLE_HALF, Layout
 from .contract import ImportError_
 
 FORMAT = "phone-puppeteer-twin"
@@ -67,12 +67,22 @@ def _copy(src: str | None, file_dir: Path, sub: str) -> str | None:
     return rel
 
 
+def _table_half(doc: dict, lay: Layout) -> tuple:
+    """The table: what the file says, else 80 x 60 cm, grown to hold every object."""
+    if doc.get("table_cm"):
+        return (float(doc["table_cm"][0]) / 200, float(doc["table_cm"][1]) / 200)
+    hx, hy = DEFAULT_TABLE_HALF
+    for p in lay.props:
+        hx, hy = max(hx, abs(p["pos"][0]) + p["size"][0] + 0.05), max(hy, abs(p["pos"][1]) + p["size"][1] + 0.05)
+    return (hx, hy)
+
+
 # ---------------- twin -> document ----------------
 def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> dict:
     """Describe the twin as it is NOW (current object positions), copying its files into file_dir."""
-    k = float(layout.meta.get("sim_scale", 2.0))
-    cm = lambda v: round(float(v) / k * 100, 2)
-    doc = {"format": FORMAT, "version": 1, "name": layout.meta.get("name", name), "sim_scale": k,
+    cm = lambda v: round(float(v) * 100, 2)
+    doc = {"format": FORMAT, "version": 1, "name": layout.meta.get("name", name), "sim_scale": 1.0,
+           "table_cm": [cm(2 * layout.table_half[0]), cm(2 * layout.table_half[1])],
            "table_texture": _copy(layout.texture, file_dir, "."), "objects": [], "obstacles": [], "scene": []}
     if doc["table_texture"]:
         doc["table_texture"] = doc["table_texture"].lstrip("./")
@@ -95,7 +105,7 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
                                  "yaw_deg": round(float(ob.get("yaw", 0.0)), 1), "color": _hex(ob["rgb"])})
     for m in layout.scene:
         e = {"mesh": _copy(m["file"], file_dir, "scene"), "pos_cm": [cm(v) for v in m.get("pos", (0, 0, 0))],
-             "euler_deg": list(m.get("euler", (0, 0, 0))), "scale": round(m.get("scale", k) / k, 6)}
+             "euler_deg": list(m.get("euler", (0, 0, 0))), "scale": round(m.get("scale", 1.0), 6)}
         tex = _copy(m.get("texture"), file_dir, "scene")
         if tex:
             e["texture"] = tex
@@ -110,8 +120,7 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
 def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
     if doc.get("format") not in (FORMAT, None):
         raise ImportError_(f"Not a twin file (format={doc.get('format')!r}).")
-    k = float(doc.get("sim_scale", 2.0))
-    m = lambda v: float(v) / 100 * k  # real cm -> sim metres
+    m = lambda v: float(v) / 100              # real cm -> sim metres (an older "sim_scale" in the file is ignored)
 
     def f(rel):
         if not rel:
@@ -122,7 +131,7 @@ def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
         return str(p)
 
     lay = Layout()
-    lay.meta = {"sim_scale": k, "name": doc.get("name", "twin")}
+    lay.meta = {"name": doc.get("name", "twin")}
     lay.texture = f(doc.get("table_texture"))
     if doc.get("blocks") or doc.get("zones"):
         print("[twin] this file has coloured blocks or zones; they are no longer supported and are ignored.")
@@ -153,7 +162,8 @@ def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
     for e in doc.get("scene", []):
         lay.scene.append({"file": f(e["mesh"]), "texture": f(e.get("texture")),
                           "pos": tuple(m(v) for v in e.get("pos_cm", (0, 0, 0))),
-                          "euler": tuple(e.get("euler_deg", (0, 0, 0))), "scale": float(e.get("scale", 1.0)) * k})
+                          "euler": tuple(e.get("euler_deg", (0, 0, 0))), "scale": float(e.get("scale", 1.0))})
+    lay.table_half = _table_half(doc, lay)
     if doc.get("camera"):
         c = doc["camera"]
         lay.view = {"pos": [m(v) for v in c["pos_cm"]], "xyaxes": c["xyaxes"], "fovy": c.get("fovy", 60)}

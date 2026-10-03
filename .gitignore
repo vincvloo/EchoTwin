@@ -21,3 +21,4 @@ __pycache__/
 *.pt
 *.ts
 *.onnx
+MUJOCO_LOG.TXT

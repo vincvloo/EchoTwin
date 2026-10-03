@@ -17,9 +17,8 @@ from .dataset import Dataset, score_episode, state_vector
 from .features import prop_skills as PS
 from .features import tasks as T
 from .router import Intent
-from .scene import HOME, TABLE_HALF, Layout
+from .scene import Layout
 
-TABLE_HALF_X = TABLE_HALF[0]
 from .voice import Voice
 from .world import CTRL_DT, VMAX, World
 
@@ -107,9 +106,6 @@ class Sim:
     # ---------------- world changes ----------------
     def _rebuild(self, layout: Layout):
         self.world.build(layout)
-        if layout.props:  # keep the robot out of the picture
-            w = self.world
-            w.data.mocap_pos[w.hand_mocap] = [TABLE_HALF_X - 0.08, -0.34, 0.28]
         self.world.settle(5)
         if self._renderer is not None:
             self._renderer.close()
@@ -187,7 +183,8 @@ class Sim:
             recording = self.mode == "replay"
         elif self.authority == "human":
             fresh = time.time() - self.human_t < HUMAN_TIMEOUT
-            action = np.array([*(self.human_v * VMAX if fresh else np.zeros(3)), 1.0 if self.human_grip else 0.0])
+            action = np.array([*(self.human_v * VMAX if fresh else np.zeros(3)), 1.0 if self.human_grip else 0.0,
+                               w.auto_yaw(w.hand_pos())])  # the wrist turns to the nearest object by itself
             if self.mode == "teach":
                 moving = np.linalg.norm(action[:3]) > 0.01 or action[3] != float(w.hand.grip)
                 recording = bool(self.frames) or moving
@@ -268,6 +265,11 @@ class Sim:
         if PS.goal_met(w, task):
             self.emit({"t": "decision", "kind": "done", "task": task, "why": "checked the table: it is already there"})
             return self.say(f"Already done: the {name} is {where}.")
+        # 1b. can my arm do it at all?
+        why_not = w.refusal(me, goal)
+        if why_not:
+            self.emit({"t": "decision", "kind": "refuse", "task": task, "why": why_not})
+            return self.say(f"I can't move the {name}: {why_not}.")
         # 2. do I know how to handle this kind of object?
         n = self.skills.count(shape)
         if n < PS.MIN_PROP_DEMOS:
@@ -285,7 +287,7 @@ class Sim:
                                      line=f"I tried it in my head: {im['text']}. Can you show me how?")
         self.plan = {"uncertainty": u, "parts": skill["parts"], "why": why}
         self.ghost = im["path"]
-        self.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task,
+        self.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": w.grasp_yaw(task["object"]),
                        "before": {k: w.obj_pos(k)[:2].copy() for k in w.things()}}
         self.mode, self.authority = "move", "robot"
         self.emit({"t": "decision", "kind": "do", "task": task, "uncertainty": round(u, 2), "sure": T.percent_sure(u),
@@ -338,7 +340,7 @@ class Sim:
                  "drop": float(rng.uniform(0.002, 0.012)), "speed": float(rng.uniform(0.14, 0.25))}
         wps = PS.waypoints(w, task, style)
         st["tries"] += 1
-        st["cur"] = {"task": task, "r": {"wps": wps, "i": 0, "speed": style["speed"]}, "frames": [], "settle": 0,
+        st["cur"] = {"task": task, "r": {"wps": wps, "i": 0, "speed": style["speed"], "yaw": w.grasp_yaw(task["object"])}, "frames": [], "settle": 0,
                      "before": {k: w.obj_pos(k)[:2].copy() for k in w.things()}, "text": text}
         self.task = task
         self.ghost = np.array([wp[1] for wp in wps if wp[0] == "move"])
@@ -409,7 +411,7 @@ class Sim:
         task, goal, o = self._make_prop_task(plan, f"put the {name} {MT.describe_goal(self.world, plan)}")
         self.task = task
         wps = PS.waypoints(self.world, task, dict(PS.DEFAULTS))
-        self.replay = {"wps": wps, "i": 0, "speed": 0.15, "task": task}
+        self.replay = {"wps": wps, "i": 0, "speed": 0.15, "task": task, "yaw": self.world.grasp_yaw(task["object"])}
         self.mode, self.authority, self.frames = "replay", "robot", []
         self.emit({"t": "decision", "kind": "teach", "task": task, "reason": "video",
                    "why": f"learning {PS.KIND_LABEL[task['shape']]} from your video"})
@@ -502,8 +504,8 @@ class Sim:
         if n == "reset":
             return self.reset_scene()
         if n == "home":
-            if not w.hand.attached:
-                w.data.mocap_pos[w.hand_mocap] = HOME
+            if not w.hand.held:
+                w.go_rest()
             return self.say("Home.")
 
     # ---------------- answers from state (no AI) ----------------

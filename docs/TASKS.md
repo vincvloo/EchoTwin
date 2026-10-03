@@ -14,9 +14,10 @@
 ## Next: from the simulation to a real robot with transferable skills
 In this order. Each step is only meaningful once the one before it is solid.
 
-- [ ] **PR8 A physically honest simulation.** Real scale (no 2x table), an arm model (a low-cost 5 to 6 joint arm such as
-      the SO-101 is a likely first target; to verify), a contact grasp with friction and mass instead of gluing the object
-      to the hand, then re-check every current skill against it. What fails here is what would fail on hardware.
+- [x] **PR8 A physically honest simulation.** Real scale, a swappable 5-joint arm (built-in, SO-ARM100, or your own
+      descriptor), a contact grasp with friction and mass instead of gluing the object to the hand, spoken refusals
+      (too wide, too thin, out of reach), and every default skill re-checked (`docs/RESULTS.md`). Open: the SO-ARM100's
+      single jaw does not hold the full table yet; tall objects are the weak spot.
 - [ ] **PR9 Skills from measurements.** Describe each object by grasp width, height, footprint and estimated weight
       instead of four shapes (flat, box, cylinder, round), so a skill learned on a mug carries over to similar
       objects and any detected name works. Needs PR8: only a physical grasp makes these numbers meaningful.

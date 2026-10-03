@@ -32,7 +32,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     cv2.imwrite(str(out / "twin.jpg"), ann, [cv2.IMWRITE_JPEG_QUALITY, 85])
     lay = Layout()
     lay.texture, lay.props = tex, props
-    lay.meta["sim_scale"] = res.get("sim_scale", 2.0)
+    lay.table_half = res.get("table_half", lay.table_half)
     n = len(props)
     ai = ctx.ask_ai_json is not None
     summary = {"id": sid, "mode": "everyday", "frames": len(frames), "views": 1, "fallback": False,

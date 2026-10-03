@@ -82,9 +82,9 @@ For each kind of object (flat, box, glass-like, round) it stores four numbers pe
 
 | Number | Meaning |
 |---|---|
-| grip | how high to grip the object, as a fraction of its half height above or below the centre |
+| grip | where along its height the pads take it, from low (-1) to high (+1); thin things are always taken near the table |
 | lift | how far to lift it above the tallest thing on the table |
-| drop | how gently to set it down (height of the hand above the resting height at release) |
+| drop | how gently to set it down (height of the tool above the resting height at release) |
 | speed | how fast you moved |
 
 With one kept demo it can plan a move for that kind of object, using the **median** of what it has seen. It also

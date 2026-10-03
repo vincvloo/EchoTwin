@@ -51,3 +51,50 @@ example OWLv2 or Grounding DINO, which have permissive licences) were not tested
 
 Use your own words: put one name per line in a text file and set `DETECT_PROMPTS=my_words.txt` in `.env`, or try it
 first with `bench_detect ... yoloe-26s-seg.pt:text=my_words.txt`.
+
+## Do the default skills survive a physical simulation? (PR8)
+
+Before PR8 the "gripper" was a floating hand that glued the nearest object to itself, on a table drawn twice the real
+size. Every skill worked because nothing could go wrong. PR8 replaced it with a 5-joint arm, real scale, a grasp made
+only of friction and force, and a mass from the object's size. `python -m echotwin.robot.skillcheck` runs each default
+skill on four shapes (real sizes: flat 10 x 6 x 2 cm, box 5 x 4 x 4 cm, cylinder 7 cm wide and 10 cm tall, ball 5 cm)
+and three tasks, with the object at a random reachable spot, and judges the result like a real run.
+
+| Shape | Task | Before (kinematic, 6 trials) | Now (arm, contact grasp, 12 trials) | Seconds before / now |
+|---|---|---|---|---|
+| flat | next to | 100 % | 100 % | 7.1 / 5.6 |
+| flat | to the left | 100 % | 100 % | 7.4 / 6.7 |
+| flat | on top of | 100 % | 100 % | 7.0 / 8.0 |
+| box | next to | 100 % | 100 % | 7.1 / 6.9 |
+| box | to the left | 100 % | 100 % | 7.2 / 8.4 |
+| box | on top of | 100 % | 100 % | 7.2 / 7.4 |
+| cylinder | next to | 100 % | 83 % | 9.7 / 13.5 |
+| cylinder | to the left | 100 % | 92 % | 9.2 / 13.7 |
+| cylinder | on top of | 100 % | 67 % | 9.4 / 14.7 |
+| ball | next to | 100 % | 100 % | 7.8 / 6.7 |
+| ball | to the left | 100 % | 100 % | 7.4 / 6.6 |
+| ball | on top of | 100 % | 92 % | 6.8 / 6.8 |
+
+Overall: 100 % before, 94 % now (the last column of the run is a mean over the successful trials).
+
+What this says:
+
+- **The old 100 % said nothing.** It confirmed the premise: a glued object cannot fail. The new numbers are the first
+  that could transfer to a real arm, and they show where it would break.
+- **Tall objects are the weak spot.** The 10 cm cylinder is gripped by the lower part, swings when the arm turns,
+  and tips over when set down; stacking it needs a carry height at the edge of what the arm reaches (22 cm at best,
+  less far from the base). Failures: tips over, slides off the other object, lands off the spot.
+- **Thin objects need the pad tips at the table.** With the grip aimed at the middle of the object, a 2 cm bar was
+  lost during the lift (17 % next to, 0 % otherwise). The default now aims lower for thin things; the learned
+  `grip` value (from demonstrations or practice) still moves it.
+- **Things the robot now declines, with a reason:** objects wider than the jaws (the built-in arm opens 8 cm, so a
+  12 cm box is refused), objects thinner than 1.5 cm (a pinch cannot lift them off a table), anything or any spot
+  outside the arm's reach (8 to 34 cm from its base, in the built-in arm). The check draws only reachable spots; the
+  refusals have their own tests.
+- **The SO-ARM100 does not hold up yet (19 % overall, 6 trials per cell).** Its single moving jaw presses the object
+  against the fixed jaw, and the grasp is much less forgiving than two symmetric pads: ball 83 / 67 / 0 %, box 50 /
+  33 / 0 %, cylinder and flat 0 %. It passes `--check` (a 4 cm cube and a 6 cm cylinder) but not the full table, so
+  the built-in arm is the default and the SO-ARM100 stays selectable (`ARM=so_arm100`) for work on it.
+
+Limits: one simulator, one built-in arm, boxes of fixed size, 12 trials per cell (one failure is 8 points). Treat it
+as a direction. The numbers will change when PR9 (skills from measurements) and PR12 (closed loop) land.

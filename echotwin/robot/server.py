@@ -471,8 +471,7 @@ async def twin_mesh(file: UploadFile = File(...), target: str = Form("scene")):
                 pos = [round(-t["xy"][0] * 100, 2), round(-t["xy"][1] * 100, 2), round(-t["z"] * 100 - 0.2, 2)]
                 how = f"Added your 3D scan and lined up its table ({t['area']:.1f} square metres of tabletop)."
             else:
-                k = float(doc.get("sim_scale", 2.0))
-                pos = [0, 0, round(-0.75 / k * 100 + info["extent"][2] * 100 / 2, 2)]
+                pos = [0, 0, round(-0.75 * 100 + info["extent"][2] * 100 / 2, 2)]
                 how = "Added your 3D scan. I couldn't find its table, so adjust its position in the editor."
             doc["scene"].append({"mesh": rel(info["file"]), "texture": rel(info["texture"]),
                                  "pos_cm": pos, "euler_deg": [0, 0, 0], "scale": 1.0})

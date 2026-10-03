@@ -1,14 +1,14 @@
 """MuJoCo scene generation: table, everyday objects (props), static scenery, floating gripper.
 
 Coordinates: the table centre is the origin, x to the right, y away from the user ("back"), z up.
-The sim is SCALE x real size so small objects become comfortably graspable.
+Sim metres are real metres. The table size is part of the layout (`Layout.table_half`).
 """
 from dataclasses import dataclass, field
 
-SCALE = 2.0
-WS_HALF = (297.0 / 2000 * SCALE, 210.0 / 2000 * SCALE)             # 0.297 x 0.21 m work area
-TABLE_HALF = (2 * WS_HALF[0], 2 * WS_HALF[1])                      # the table texture covers this
-HOME = (0.0, -0.16, 0.20)
+import numpy as np
+
+DEFAULT_TABLE_HALF = (0.40, 0.30)       # half size of the table (x, y) in metres, when nothing says otherwise
+TABLE_ASPECT = 1188 / 840               # width / height of the table texture the quick importer builds
 
 
 @dataclass
@@ -19,13 +19,31 @@ class Layout:
     view: dict | None = None  # camera where the phone was: {pos, xyaxes, fovy}
     # 3D scans: scenery meshes (visual only): {file, texture?, pos(3), euler(3, deg), scale}
     scene: list = field(default_factory=list)
-    meta: dict = field(default_factory=dict)  # e.g. {"sim_scale": sim metres per real metre, "name": ...}
+    meta: dict = field(default_factory=dict)  # e.g. {"name": ...}
     # fixed furniture next to the table: {name, shape, pos, size (half xyz), rgb, yaw}; solid, never moved
     obstacles: list = field(default_factory=list)
+    table_half: tuple = DEFAULT_TABLE_HALF   # real metres
 
     def copy(self) -> "Layout":
         return Layout(self.texture, [dict(p) for p in self.props], self.view,
-                      [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles])
+                      [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles],
+                      tuple(self.table_half))
+
+
+DENSITY = 300.0     # kg/m3, everyday objects are mostly hollow or light
+
+
+def prop_mass(pr: dict) -> float:
+    """Mass from size and shape (kg), between 20 and 400 g."""
+    hx, hy, hz = pr["size"]
+    shape = pr.get("shape")
+    if shape == "cylinder":
+        vol = np.pi * ((hx + hy) / 2) ** 2 * 2 * hz
+    elif shape == "round":
+        vol = 4 / 3 * np.pi * hx * hy * hz
+    else:
+        vol = 8 * hx * hy * hz
+    return float(np.clip(vol * DENSITY, 0.02, 0.4))
 
 
 def _f(*v) -> str:
@@ -33,7 +51,7 @@ def _f(*v) -> str:
 
 
 def build_xml(layout: Layout) -> str:
-    tw, th = TABLE_HALF
+    tw, th = layout.table_half
     if layout.texture:
         tex = layout.texture.replace("\\", "/")
         table_asset = (f'<texture name="tabletex" type="2d" file="{tex}"/>'
@@ -70,7 +88,7 @@ def build_xml(layout: Layout) -> str:
             look = f'rgba="{_f(r, g, b)} {alpha}"'
         props.append(f'<body name="prop_{i}" pos="{_f(pr["pos"][0], pr["pos"][1], hz + 0.0005)}" euler="0 0 {pr.get("yaw", 0):.1f}">'
                      f'<freejoint name="prop_{i}"/>'
-                     f'<geom {geom} {look} mass="0.08" friction="1.5 0.05 0.01" condim="6"/></body>')
+                     f'<geom {geom} {look} mass="{prop_mass(pr):.4f}" friction="1.5 0.05 0.01" condim="6"/></body>')
 
     fixed = []
     for i, ob in enumerate(layout.obstacles):
@@ -92,14 +110,9 @@ def build_xml(layout: Layout) -> str:
         scenery.append(f'<geom name="scene_{k}" type="mesh" mesh="scene_{k}" pos="{_f(*m.get("pos", (0, 0, 0)))}" '
                        f'euler="{_f(*m.get("euler", (0, 0, 0)))}" {look} contype="0" conaffinity="0"/>')
 
-    fingers = "".join(
-        f'<body name="finger_{s}" mocap="true" pos="{_f(HOME[0] + dx, HOME[1], HOME[2] + 0.008)}">'
-        '<geom type="box" size="0.006 0.013 0.026" rgba="0.82 0.84 0.88 1" contype="0" conaffinity="0"/></body>'
-        for s, dx in (("l", -0.045), ("r", 0.045)))
-
     return f"""
 <mujoco model="puppeteer">
-  <option timestep="0.002"/>
+  <option timestep="0.002" cone="elliptic" impratio="10"/>
   <visual>
     <global offwidth="1280" offheight="960"/>
     <quality shadowsize="4096"/>
@@ -113,7 +126,7 @@ def build_xml(layout: Layout) -> str:
     {"".join(prop_assets)}
   </asset>
   <worldbody>
-    <light pos="0.3 -0.6 1.6" dir="-0.15 0.35 -1" diffuse="0.7 0.7 0.7" castshadow="true"/>
+    <light pos="0.3 -0.6 1.4" dir="-0.15 0.35 -1" diffuse="0.7 0.7 0.7" castshadow="true"/>
     <geom name="floor" type="plane" pos="0 0 -0.75" size="4 4 0.1" {'rgba="0 0 0 0"' if layout.scene else 'material="floor"'}/>
     <geom name="table" type="box" pos="0 0 -0.02" size="{_f(tw + 0.02, th + 0.02, 0.02)}" rgba="0.36 0.27 0.20 1"/>
     <geom name="tabletop" type="plane" pos="0 0 0.0002" size="{_f(tw, th, 0.01)}" material="tabletop" contype="0" conaffinity="0"/>
@@ -121,14 +134,8 @@ def build_xml(layout: Layout) -> str:
     {"".join(scenery)}
     {"".join(fixed)}
     {"".join(props)}
-    <body name="hand" mocap="true" pos="{_f(*HOME)}">
-      <geom type="box" pos="0 0 0.042" size="0.056 0.016 0.009" rgba="0.18 0.19 0.22 1" contype="0" conaffinity="0"/>
-      <geom type="cylinder" pos="0 0 0.16" size="0.014 0.11" rgba="0.30 0.32 0.36 1" contype="0" conaffinity="0"/>
-      <geom type="sphere" pos="0 0 0" size="0.004" rgba="1 1 1 0.5" contype="0" conaffinity="0"/>
-    </body>
-    {fingers}
-    <camera name="main" pos="0 -0.95 0.78" xyaxes="1 0 0 0 0.64 0.77"/>
-    <camera name="top" pos="0 0 1.35" xyaxes="1 0 0 0 1 0"/>
+    <camera name="main" pos="0.55 -0.62 0.55" xyaxes="0.758 0.652 -0.000 -0.347 0.403 0.847"/>
+    <camera name="top" pos="0 0 1.0" xyaxes="1 0 0 0 1 0"/>
     {f'<camera name="photo" pos="{_f(*layout.view["pos"])}" xyaxes="{_f(*layout.view["xyaxes"])}" fovy="{layout.view["fovy"]:.1f}"/>' if layout.view else ""}
   </worldbody>
 </mujoco>"""

@@ -45,8 +45,8 @@ def test_lounge_twin_is_table_sized_with_furniture_as_obstacles():
         assert abs(o["pos_cm"][0]) <= real_w * 50 and abs(o["pos_cm"][1]) <= real_h * 50   # on the table
     assert any(o["name"].startswith("chair") for o in twin["obstacles"])      # the chair next to the plants
     assert twin["left_out"] >= 3                                              # the far side of the room
-    # the window is sized so that it fills the sim table
-    assert abs(twin["sim_scale"] * real_w - to_twin.TABLE_SIM[0]) < 0.01
+    # nothing is scaled: real size, and the table is the window
+    assert twin["sim_scale"] == 1.0 and twin["table_cm"] == [round(real_w * 100, 1), round(real_h * 100, 1)]
 
 
 def test_things_on_a_table_pick_that_table():

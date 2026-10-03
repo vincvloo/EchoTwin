@@ -1,7 +1,7 @@
 # EchoTwin
 
-Photograph a table with your phone. EchoTwin builds a digital twin of it, finds the objects, and a simulated gripper
-robot learns to move them from a few demonstrations: "put the glass next to the chocolate".
+Photograph a table with your phone. EchoTwin builds a digital twin of it, finds the objects, and a simulated robot arm
+learns to move them from a few demonstrations: "put the glass next to the chocolate".
 
 Built to work with little data: a few phone photos instead of a LiDAR scan, a few demonstrations instead of a
 training set, any object a detector can name instead of a fixed list.
@@ -89,6 +89,7 @@ Each step also runs by itself:
 | Review with a vision model (optional) | `python -m echotwin.perception.review data/table.ply out/table_scene.json` |
 | Objects -> robot twin | `python -m echotwin.scene.to_twin out/table_scene.json --out data/twin.zip` |
 | Which detector is best? | `python -m echotwin.perception.bench_detect yolo11s-seg.pt yoloe-26s-seg.pt:text=objects365` |
+| Use another arm | `python -m echotwin.robot.arm --list` and [docs/ARMS.md](docs/ARMS.md) |
 | Tests | `python -m pytest -q tests/perception tests/scene` and `<robot python> -m pytest -q tests/robot tests/scene` |
 
 ## Where things are
@@ -96,7 +97,7 @@ Each step also runs by itself:
 ```
 echotwin/perception/   photos -> cloud -> objects, detectors, benchmark
 echotwin/scene/        the contract between perception and the robot (scene.json, class catalog, twin builder)
-echotwin/robot/        digital twin, server, skills, voice
+echotwin/robot/        digital twin with a physical arm (`arms/`), server, skills, voice
 apps/robot_ui/         the dashboard and the phone page
 docs/                  pipeline, approaches, capture and teaching guides, results, history
 examples/              table photos

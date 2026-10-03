@@ -35,7 +35,7 @@ The one file that perception writes and the rest of EchoTwin reads. Metres, in t
 The robot works on a table, so `to_twin` picks a table-sized window: a surface that holds small things, or
 else the densest group of small things. Movable objects in the window become objects to move, furniture that
 reaches into it becomes a fixed obstacle (clipped to the window), and the rest is left out. The window is
-scaled to the sim table (`sim_scale`).
+kept at its real size (`table_cm` in the twin file).
 
 Adding a class: put it in `catalog.py`. An unknown class still works; shape and `movable` are guessed from
 its name and size.

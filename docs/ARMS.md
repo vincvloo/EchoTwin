@@ -1,0 +1,49 @@
+# Arms: use the one you have
+
+The simulated robot is an arm with a two-pad gripper. The arm is not hard-coded: a small JSON file describes it, and
+`echotwin/robot/arm.py` builds it into the scene. Pick one with `ARM=` in `.env`.
+
+| `ARM=` | What it is |
+|---|---|
+| (empty) or `builtin` | A 5-joint arm written in code, SO-101 sized, two parallel pads, opens 8 cm. Works offline. All numbers in `docs/RESULTS.md` are for this one. |
+| `so_arm100` | The SO-ARM100 from MuJoCo Menagerie (Apache-2.0), one moving jaw. Fetch it first (below). Passes `--check`, not yet the full skill table. |
+| `path/to/my_arm.json` | Your own arm (relative to the repository, or absolute). |
+
+```bash
+python -m echotwin.robot.arm --list                    # which arms are described and which files are missing
+python -m echotwin.robot.arm --download so_arm100      # about 3.4 MB into models/arms/ (git-ignored), nothing else downloads
+python -m echotwin.robot.arm --check so_arm100         # loads it, prints its reach, tries a 4 cm cube and a 6 cm cylinder
+```
+
+## What the robot does with an arm
+
+- The skills still say "tool to (x, y, z), jaws open or closed". Inverse kinematics (tool position plus "tool points
+  down", the wrist roll lines the jaws up with the object) turns that into joint targets.
+- The reachable ring is measured once per arm. A request outside it, or an object the jaws cannot hold, is declined
+  with the reason ("it is 12 cm wide and my gripper opens 8 cm", "it is out of my reach").
+- An object counts as held only when two pads squeeze it. It can slip, drop or tip over, as it would on hardware.
+
+## Describe your own arm
+
+Copy `echotwin/robot/arms/builtin.json` and change it. You need an MJCF (MuJoCo XML) of the arm with position
+actuators, and these fields:
+
+| Field | Meaning |
+|---|---|
+| `mjcf` | Path of the MJCF, relative to the repository, or `builtin` |
+| `base_body` | The root body of the arm (it is attached to the table at the front edge) |
+| `mount_yaw_deg` | Turn the arm about the vertical axis so it faces into the table (try 0 or 180) |
+| `joints`, `actuators` | Exactly five each, in order: base rotation, three bending joints, wrist roll |
+| `gripper` | `mode` `parallel` (two sliding pads) or `single` (one moving jaw, set `fixed_side` to 1 or -1), the gripper `actuators`, and their `open` and `closed` values |
+| `tool` | `body` and `pos` (the point between the pads, in that body's frame), `point_axis` (the tool's axis that must point down), `close_axis` (the direction the jaws close along) |
+| `pads` | Parts of the pad geom names (used to see what is held) |
+| `home` | Five joint values to start from |
+| `max_opening` | How far the jaws open, in metres (objects wider than this are declined) |
+| `download` | Optional: repo, commit, path and files for `--download` |
+
+Names are looked up in your MJCF, so the order of things inside it does not matter. A wrong name gives an error that
+says which one. Then run `python -m echotwin.robot.arm --check path/to/my_arm.json`. If the cube or cylinder fails,
+look at the grip first: the pads need friction (1.5 or more), the closing force a few newtons, and the tool point
+a few millimetres above the lowest tip of the pads.
+
+Credit: the SO-ARM100 model is by The Robot Studio and Google DeepMind (MuJoCo Menagerie), Apache-2.0.

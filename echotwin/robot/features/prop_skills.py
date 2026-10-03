@@ -18,7 +18,7 @@ ASK = 1.0
 KIND_WORDS = {"flat": "a flat thing like that", "box": "a box like that", "cylinder": "a glass-like thing",
               "round": "a round thing like that"}
 KIND_LABEL = {"flat": "flat things", "box": "boxes", "cylinder": "glasses & bottles", "round": "round things"}
-DEFAULTS = {"grip": 0.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
+DEFAULTS = {"grip": 1.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
 
 
 # ---------------- geometry of success ----------------
@@ -83,16 +83,21 @@ def waypoints(world: World, task: dict, skill: dict, d=None) -> list:
     h = world.half(me)
     goal = task["goal"]
     tallest = world.tallest()
-    carry = float(min(tallest + h + skill["lift"], 0.43))
-    grasp_z = float(max(o[2] + skill["grip"] * h, 0.013))
+    carry_max = float(max(world.workspace.HEIGHTS[world.workspace.ok.any(axis=0)].max(), 0.06)) - 0.01
+    carry = float(min(tallest + h + skill["lift"], carry_max))
+    off = world.grasp_offset(me)
+    # pad tips low on the object; thin things need the tips right at the table
+    grasp_z = float(max(o[2] - h + 0.004 + (skill["grip"] + 1.0) * h * 0.3 * min(1.0, h / 0.03), 0.004))
     release_z = float(max(h + skill["drop"] + 0.002, 0.013))
     if task.get("stack"):  # set it down on top of the other object
         ref = task["ref"]
         release_z = float(world.obj_pos(ref, d)[2] + world.half(ref) + h + skill["drop"] + 0.006)
-        carry = float(min(max(carry, release_z + 0.05), 0.43))
-    return [("move", [o[0], o[1], carry]), ("move", [o[0], o[1], grasp_z]), ("grip", 1.0), ("move", [o[0], o[1], carry]),
-            ("move", [goal[0], goal[1], carry]), ("move", [goal[0], goal[1], release_z]), ("grip", 0.0),
-            ("move", [goal[0], goal[1], carry])]
+        carry = float(min(max(carry, release_z + 0.05), carry_max))
+    ox, oy = o[0] + off[0], o[1] + off[1]          # the tool stands beside the object for a single-jaw gripper
+    gx, gy = goal[0] + off[0], goal[1] + off[1]
+    return [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
+            ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
+            ("move", [gx, gy, carry])]
 
 
 def waypoint_action(world: World, r: dict, d=None, hs=None):
@@ -103,26 +108,26 @@ def waypoint_action(world: World, r: dict, d=None, hs=None):
     kind, arg = r["wps"][r["i"]]
     if kind == "grip":
         r["wait"] = r.get("wait", 0) + 1
-        if r["wait"] >= 3:
+        if r["wait"] >= 4 and (world.grip_settled(d) or r["wait"] >= 25):
             r["i"], r["wait"] = r["i"] + 1, 0
-        return np.array([0, 0, 0, arg])
+        return np.array([0, 0, 0, arg, r.get("yaw", 0.0)])
     dv = np.array(arg) - world.hand_pos(d)
     n = np.linalg.norm(dv)
     r["ticks"] = r.get("ticks", 0) + 1
-    if n < 0.006 or r["ticks"] > 80:  # reached, or unreachable: move on rather than hang
+    if n < 0.003 or r["ticks"] > 80:  # reached, or unreachable: move on rather than hang
         r["i"] += 1
         r["ticks"] = 0
     v = dv * 5.0
     if np.linalg.norm(v) > r["speed"]:
         v *= r["speed"] / np.linalg.norm(v)
-    return np.array([*v, 1.0 if hs.grip else 0.0])
+    return np.array([*v, 1.0 if hs.grip else 0.0, r.get("yaw", 0.0)])
 
 
 def imagine(world: World, task: dict, wps: list, speed: float) -> dict:
     """Run the whole move on a copy of the world and judge the result."""
     d, hs = world.clone()
     before = {n: world.obj_pos(n)[:2].copy() for n in world.things()}
-    r = {"wps": wps, "i": 0, "speed": speed}
+    r = {"wps": wps, "i": 0, "speed": speed, "yaw": world.grasp_yaw(task["object"])}
     path = []
     for _ in range(900):
         a = waypoint_action(world, r, d, hs)
@@ -131,7 +136,7 @@ def imagine(world: World, task: dict, wps: list, speed: float) -> dict:
         world.step(a, d, hs)
         path.append(world.hand_pos(d))
     for _ in range(25):  # let it settle
-        world.step(np.array([0, 0, 0, 0.0]), d, hs)
+        world.step(np.array([0, 0, 0, 0.0, r["yaw"]]), d, hs)
     res = outcome(world, task, before, d, hs)
     res["path"] = np.array(path)
     return res

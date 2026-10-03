@@ -11,7 +11,7 @@ Scale is approximate (camera height assumed), which is fine for a twin you look 
 import cv2
 import numpy as np
 
-from ..scene import TABLE_HALF
+from ..scene import TABLE_ASPECT
 
 CAM_HEIGHT = 0.45        # metres above the table, assumed
 MAX_OBJECTS = 8
@@ -205,17 +205,18 @@ def apply_names(res: dict, ai: dict | None):
 
 
 def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
-    """Fit the mapped area onto the sim table -> (props for the Layout, texture path, annotated image)."""
+    """Real-size objects on a table that fits them -> (props for the Layout, texture path, annotated image).
+    Sets res["table_half"] (metres): the mapped area, with the shape of the texture."""
     items, cam, bgr = res["items"], res["cam"], res["bgr"]
     pts = np.array([it["xy"] for it in items]) if items else np.array([[0.0, 0.35]])
     cx, cy = pts[:, 0].mean(), pts[:, 1].mean()
     span_x = max(0.5, (pts[:, 0].max() - pts[:, 0].min()) * 1.6 + 0.15)
     span_y = max(0.35, (pts[:, 1].max() - pts[:, 1].min()) * 1.6 + 0.15)
-    tw, th = 2 * TABLE_HALF[0], 2 * TABLE_HALF[1]
-    real_w = max(span_x, span_y * tw / th)
-    real_h = real_w * th / tw
-    s = tw / real_w  # real metres -> sim metres
-    res["sim_scale"] = float(s)
+    real_w = max(span_x, span_y * TABLE_ASPECT)
+    real_h = real_w / TABLE_ASPECT
+    tw, th = real_w, real_h
+    s = 1.0  # sim metres are real metres
+    res["table_half"] = (float(real_w / 2), float(real_h / 2))
     # texture: warp the photo's table plane onto the sim table
     corners = [(cx - real_w / 2, cy - real_h / 2), (cx + real_w / 2, cy - real_h / 2),
                (cx + real_w / 2, cy + real_h / 2), (cx - real_w / 2, cy + real_h / 2)]
