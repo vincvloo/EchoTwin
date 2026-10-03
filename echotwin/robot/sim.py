@@ -12,7 +12,9 @@ import cv2
 import mujoco
 import numpy as np
 
+from . import backend as BK
 from . import config
+from . import runlog
 from .dataset import Dataset, score_episode, state_vector
 from .features import prop_skills as PS
 from .features import measure as M
@@ -31,7 +33,7 @@ class Sim:
     def __init__(self, emit):
         self.emit = emit
         self.voice = Voice(emit)
-        self.world = World()
+        self.world, self.backend_note = BK.make()
         self.base_layout = self.world.layout.copy()
         self.rng = np.random.default_rng()
         self.dataset = Dataset()
@@ -110,7 +112,7 @@ class Sim:
         self.world.settle(5)
         if self._renderer is not None:
             self._renderer.close()
-            self._renderer = mujoco.Renderer(self.world.model, H, W)
+            self._renderer = mujoco.Renderer(self.world.view.model, H, W)
         self.human_grip = False
         self.ghost = None
 
@@ -158,6 +160,7 @@ class Sim:
     def halt(self, reason: str):
         self.halted = True
         self.halt_reason = reason
+        self.world.stop()                                   # a real arm: torque off
         self.voice.hush()
         self.say("Stopped.")
         self.haptic([400])
@@ -168,6 +171,7 @@ class Sim:
             self.say("I'm not stopped.")
             return
         self.halted = False
+        self.world.resume()
         self.say("Continuing.")
 
     # ---------------- the tick ----------------
@@ -266,6 +270,8 @@ class Sim:
         if PS.goal_met(w, task):
             self.emit({"t": "decision", "kind": "done", "task": task, "why": "checked the table: it is already there"})
             return self.say(f"Already done: the {name} is {where}.")
+        if not w.arm_ready():
+            return self.say("The real arm is waiting. Say or press 'arm the robot' to let it move, then ask again.")
         # 1b. can my arm do it at all?
         why_not = w.refusal(me, goal)
         if why_not:
@@ -426,6 +432,7 @@ class Sim:
             t = r["task"]
             self.mode, self.authority, self.ghost = "idle", "human", None
             res = PS.outcome(w, t, r["before"])
+            runlog.record(w.name, t, res, self.dataset.root.parent / "runs.jsonl")
             self.robot_runs["runs"] += 1
             if res["ok"]:
                 self.robot_runs["success"] += 1
@@ -481,6 +488,9 @@ class Sim:
         w = self.world
         if n == "continue":
             return self.resume()
+        if n == "arm_robot":
+            self.world.enable()
+            return self.say("The arm may move now." if self.world.name == "real" else "There is no real arm to arm.")
         if n in ("keep", "yes") and self.mode == "review":
             return self.keep(True)
         if n in ("discard", "no") and self.mode == "review":
@@ -603,7 +613,8 @@ class Sim:
     # ---------------- output ----------------
     def _render(self):
         r = self._renderer
-        r.update_scene(self.world.data, camera="photo" if self.world.layout.view else "main")
+        view = self.world.view
+        r.update_scene(view.data, camera="photo" if view.layout.view else "main")
         if self.ghost is not None and len(self.ghost):
             scn = r.scene
             u = self.plan["uncertainty"] if self.plan else 0.5
@@ -656,5 +667,6 @@ class Sim:
                        "h": pr["size"][2]} for i, pr in enumerate(w.layout.props)],
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
+            "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready()},
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,
         })

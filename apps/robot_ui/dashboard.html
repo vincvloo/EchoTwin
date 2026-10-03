@@ -12,7 +12,7 @@ header{display:flex;align-items:center;gap:16px;padding:14px 20px;border-bottom:
 h1{font-size:18px;margin:0;letter-spacing:.3px}
 h1 small{color:var(--dim);font-weight:500;margin-left:8px}
 .pill{padding:5px 11px;border-radius:999px;background:var(--card);border:1px solid var(--line);font-weight:600;font-size:13px}
-.pill.ok{color:var(--accent)} .pill.off{color:var(--dim)}
+.pill.ok{color:var(--accent)} .pill.off{color:var(--dim)} .pill.warn{color:#e0a030}
 #phoneLink{margin-left:auto;display:flex;align-items:center;gap:12px;color:var(--dim);font-size:13px}
 #qr{background:white;padding:4px;border-radius:6px;width:74px;height:74px}
 #qr img,#qr canvas{width:66px!important;height:66px!important}
@@ -112,6 +112,8 @@ kbd{background:#0f1418;border:1px solid var(--line);border-radius:4px;padding:0 
   <span class="pill off" id="conn">offline</span>
   <span class="pill off" id="phonePill">phone —</span>
   <span class="pill off" id="aiPill">AI off</span>
+  <span class="pill ok" id="backendPill" title="">sim</span>
+  <button id="armBtn" data-say="arm the robot" hidden>Arm the robot</button>
   <div id="phoneLink"><div><div>Phone controller</div><b id="phoneUrl" style="color:var(--text)"></b></div><div id="qr"></div></div>
 </header>
 <main>
@@ -281,6 +283,12 @@ function renderState() {
     const n = (s.props || []).map(p => p.name);
     $('#txt').placeholder = n.length ? `Tell Pip… e.g. put the ${n[0]} next to the ${n[1] || n[0]}` : 'Scan your table first, then tell Pip what to move';
     if (lastStats) renderStats(lastStats);
+  }
+  if (s.backend) {
+    const bp = $('#backendPill');
+    bp.textContent = s.backend.name === 'real' ? (s.backend.note.startsWith('Real arm') ? 'REAL ARM' : 'mock arm') : 'sim';
+    bp.className = 'pill ' + (s.backend.name === 'real' ? 'warn' : 'ok'); bp.title = s.backend.note;
+    $('#armBtn').hidden = s.backend.ready !== false;
   }
   const b = $('#badge');
   b.textContent = s.halted ? `■ STOPPED (${s.halt_reason})` : s.mode === 'move' ? '● Pip is acting' : s.mode === 'practice' ? '● Practising in the twin' :

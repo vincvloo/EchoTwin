@@ -42,6 +42,8 @@ class HandState:
 
 
 class World:
+    name = "sim"                      # the back-end this is (see backend.py)
+
     def __init__(self, layout: Layout | None = None, arm: "A.ArmSpec | str | None" = None):
         self.arm = arm if isinstance(arm, A.ArmSpec) else A.load(arm)
         self.layout = layout or Layout()
@@ -217,11 +219,10 @@ class World:
         rel = self.workspace.clamp(t - np.array([self.base[0], self.base[1], 0.0]), Z_MIN)
         return rel + np.array([self.base[0], self.base[1], 0.0])
 
-    def step(self, action, d=None, hs: HandState | None = None):
-        """Advance one control tick. action = (vx, vy, vz, grip in {0,1}[, yaw of the jaws])."""
-        d = d if d is not None else self.data
+    def command(self, action, hs: HandState | None = None) -> np.ndarray:
+        """The controller half of a tick: the wanted tool motion -> joint setpoints (hs.q is updated and returned).
+        action = (vx, vy, vz, grip in {0,1}[, yaw of the jaws]); the same for every back-end."""
         hs = hs if hs is not None else self.hand
-        m = self.model
         a = np.asarray(action, dtype=float)
         v = np.clip(a[:3], -VMAX, VMAX)
         if len(a) > 4:
@@ -230,14 +231,65 @@ class World:
         hs.grip = bool(a[3] > 0.5)
         q, _, _ = self.ik.solve(hs.target, hs.yaw, hs.q)
         hs.q = hs.q + np.clip(q - hs.q, -JOINT_SPEED * CTRL_DT, JOINT_SPEED * CTRL_DT)
-        for act, val in zip(self.act, hs.q):
+        return hs.q
+
+    def advance(self, d, hs: HandState, q=None, grip=None):
+        """The physics half of a tick: servo targets (`q`, default hs.q; `grip` closed or not, default hs.grip) into
+        the actuators, step the world for one control period, and find out what the pads hold."""
+        q = hs.q if q is None else q
+        grip = hs.grip if grip is None else grip
+        for act, val in zip(self.act, q):
             d.ctrl[act] = val
-        key = "closed" if hs.grip else "open"
+        key = "closed" if grip else "open"
         for act, val in zip(self.gact, self.arm.gripper[key]):
             d.ctrl[act] = val
-        for _ in range(max(1, int(round(CTRL_DT / m.opt.timestep)))):
-            mujoco.mj_step(m, d)
-        hs.held = self._held(d) if hs.grip else None
+        for _ in range(max(1, int(round(CTRL_DT / self.model.opt.timestep)))):
+            mujoco.mj_step(self.model, d)
+        hs.held = self._held(d) if grip else None
+
+    def step(self, action, d=None, hs: HandState | None = None):
+        """Advance one control tick. action = (vx, vy, vz, grip in {0,1}[, yaw of the jaws])."""
+        d = d if d is not None else self.data
+        hs = hs if hs is not None else self.hand
+        self.command(action, hs)
+        self.advance(d, hs)
+
+    # ---------- the robot contract (backend.py): the rest of it ----------
+    @property
+    def twin(self) -> "World":
+        """The simulation that plans and imagines. For the sim back-end that is the world itself."""
+        return self
+
+    @property
+    def view(self) -> "World":
+        """The world to draw on the dashboard: what the robot is really doing."""
+        return self
+
+    def enable(self):
+        """Let the arm move (a real arm waits for this before its first move)."""
+
+    def stop(self):
+        """Emergency stop. The simulation has nothing to switch off (Sim halts the ticks)."""
+
+    def resume(self):
+        pass
+
+    def close(self):
+        pass
+
+    def arm_ready(self) -> bool:
+        return True
+
+    def tilt(self, name: str, d=None) -> float:
+        """Angle (degrees) between an object's up axis and the world's."""
+        d = d if d is not None else self.data
+        w, x, y, z = d.qpos[self.obj_qadr[name] + 3:self.obj_qadr[name] + 7]
+        return float(np.degrees(np.arccos(np.clip(1 - 2 * (x * x + y * y), -1, 1))))
+
+    def carry_height(self) -> float:
+        """The highest the tool can carry something over the table, a little below the arm's ceiling."""
+        ws = self.workspace
+        return float(max(ws.HEIGHTS[ws.ok.any(axis=0)].max(), 0.06)) - 0.01
 
     def settle(self, ticks: int = 20):
         for _ in range(ticks):

@@ -16,6 +16,7 @@ class Intent:
 SAFETY = r"\b(stop|halt|freeze|wait|pause|hold on|emergency|no no)\b"
 CONTROL = [
     ("continue", r"\b(continue|go on|resume|carry on|keep going|go ahead|proceed)\b"),
+    ("arm_robot", r"^(arm|arm the robot|arm the arm|enable the arm|let the arm move)$"),
     ("keep", r"\b(keep it|keep that|keep this|save it|yes keep|keep)\b"),
     ("discard", r"\b(discard|throw it away|delete it|bin it|drop that one|don t keep)\b"),
     ("robot_turn", r"\b(your turn|you do it|you try|try it|try again|try now|show me what you learned|over to you)\b"),
