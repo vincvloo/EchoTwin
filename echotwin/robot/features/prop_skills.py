@@ -10,6 +10,8 @@ A new object is planned from the demos of objects of a similar size (the closer,
 Before acting, the robot imagines the move on a copy of the world and checks the outcome:
 lands near the goal, stays upright, does not knock anything over.
 """
+import os
+
 import numpy as np
 
 from ..world import VMAX, World
@@ -74,9 +76,12 @@ def outcome(world: World, task: dict, before: dict, d=None, hs=None) -> dict:
 
 
 # ---------------- the plan as waypoints ----------------
-def waypoints(world: World, task: dict, skill: dict, d=None) -> list:
+def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
+    """The move as 8 steps. `pos`: where the object is seen to be (x, y), instead of where the robot believes it is."""
     me = task["object"]
     o = world.obj_pos(me, d)
+    if pos is not None:
+        o = np.array([pos[0], pos[1], o[2]])
     h = world.half(me)
     goal = task["goal"]
     tallest = world.tallest()
@@ -97,12 +102,111 @@ def waypoints(world: World, task: dict, skill: dict, d=None) -> list:
             ("move", [gx, gy, carry])]
 
 
+# ---------------- the closed loop: look, check, retry ----------------
+MAX_ATTEMPTS = 3          # the first try and two retries, then the robot asks to be shown
+SEEN_MOVED = 0.015        # the object is this far from where it was believed: say so
+LOOK_TICKS = 3            # hold still this long before looking, so the arm and the picture settle
+
+
+def closed_loop_on(world, env=None) -> bool:
+    """CLOSED_LOOP=on|off|auto: auto is on for a real arm (and the mock one), where the robot only believes where objects are."""
+    v = ((os.environ if env is None else env).get("CLOSED_LOOP") or "auto").strip().lower()
+    return v == "on" or (v == "auto" and getattr(world, "name", "sim") == "real")
+
+
+def loop_start(world, task: dict, skill: dict, max_attempts: int = MAX_ATTEMPTS) -> tuple[list, dict]:
+    """(first steps, loop state) of a move that looks before it grips: park the arm out of the way, then observe.
+    Everything after `observe` is planned from what is seen."""
+    park = [float(v) for v in world.observe_pose(world.obj_pos(task["object"])[:2])]
+    return [("move", park), ("observe", None)], {"task": task, "skill": skill, "attempts": 0, "max": max_attempts, "park": park,
+                                                  "planned": None, "log": []}
+
+
+def _hold(world, r):
+    return np.array([0, 0, 0, 1.0 if world.hand.grip else 0.0, r.get("yaw", 0.0)])
+
+
+def _say(r, text):
+    r.setdefault("events", []).append(text)
+    r["loop"]["log"].append(text)
+
+
+def _end(r):
+    r["i"] = len(r["wps"])
+
+
+def _retry(world, r, why: str):
+    """A check failed: open the jaws, lift, go back to look, or give up after the last attempt."""
+    lp = r["loop"]
+    lp["attempts"] += 1
+    name = lp["task"]["name"]
+    if lp["attempts"] >= lp["max"]:
+        _say(r, f"I tried {lp['attempts']} times and the {name} still isn't where it should be.")
+        return _end(r)
+    _say(r, f"{why} Trying again ({lp['attempts'] + 1} of {lp['max']}).")
+    here = world.hand_pos()
+    up = [float(here[0]), float(here[1]), float(world.carry_height())]
+    r["wps"] = r["wps"][:r["i"]] + [("grip", 0.0), ("move", up), ("move", lp["park"]), ("observe", None)]
+    r["wait"] = r["ticks"] = 0
+
+
+def _observe(world, r):
+    lp, me = r["loop"], r["loop"]["task"]["object"]
+    task, name = lp["task"], lp["task"]["name"]
+    r["wait"] = r.get("wait", 0) + 1
+    if r["wait"] <= LOOK_TICKS:
+        return _hold(world, r)
+    r["wait"] = 0
+    believed = lp["planned"] if lp["planned"] is not None else world.obj_pos(me)[:2].copy()   # before looking moves the belief
+    seen = world.observe(me)
+    if seen is None:
+        _say(r, f"I can't see the {name}.")
+        lp["lost"] = True
+        return _end(r) or _hold(world, r)
+    if np.linalg.norm(np.asarray(seen, float) - believed) > SEEN_MOVED and lp["attempts"] == 0:
+        _say(r, f"The {name} isn't where I thought. Adjusting.")
+    lp["planned"] = np.asarray(seen, float)
+    w = waypoints(world, task, lp["skill"], pos=seen)
+    park = ("move", lp["park"])
+    r["wps"] = r["wps"][:r["i"]] + [w[0], w[1], w[2], ("check_grasp", None), w[3], ("check_lift", None), w[4], w[5], w[6], w[7],
+                                     park, ("check_goal", None)]
+    r["ticks"] = 0                                          # index i now points at the first step planned from what was seen
+    return _hold(world, r)
+
+
+def _check(kind, world, r):
+    lp = r["loop"]
+    me, name = lp["task"]["object"], lp["task"]["name"]
+    if kind == "check_grasp":
+        if world.hand.held != me:
+            _retry(world, r, f"I missed the {name}.")
+        else:
+            r["i"] += 1
+    elif kind == "check_lift":
+        if world.hand.held != me:
+            _retry(world, r, f"I dropped the {name}.")
+        else:
+            r["i"] += 1
+    elif kind == "check_goal":
+        world.observe(me)                                    # look once more: where did it end up?
+        if goal_met(world, lp["task"]):
+            _end(r)
+        else:
+            _retry(world, r, f"The {name} isn't where it should be.")
+    return _hold(world, r)
+
+
 def waypoint_action(world: World, r: dict, d=None, hs=None):
-    """Next action along r["wps"]; advances r. Returns None when finished."""
+    """Next action along r["wps"]; advances r. Returns None when finished.
+    With r["loop"] (see loop_start) the list also has observe and check steps, which look and may re-plan or retry."""
     hs = hs if hs is not None else world.hand
     if r["i"] >= len(r["wps"]):
         return None
     kind, arg = r["wps"][r["i"]]
+    if kind == "observe":
+        return _observe(world, r)
+    if kind in ("check_grasp", "check_lift", "check_goal"):
+        return _check(kind, world, r)
     if kind == "grip":
         r["wait"] = r.get("wait", 0) + 1
         if r["wait"] >= 4 and (world.grip_settled(d) or r["wait"] >= 25):

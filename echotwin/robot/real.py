@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from .drivers import Driver
+from .drivers import Driver, closure
 from .world import CTRL_DT, World
 
 REAL_SPEED = 0.5            # a real arm moves at half the simulation's tool speed
 SETTLED = 0.02              # the gripper closure changes less than this per tick: it has stopped
 CLOSED_ALL_THE_WAY = 0.95   # a closure above this means the jaws met nothing (or the object slipped out)
+DISAGREE = 0.15             # the real jaws and the twin's jaws are this far apart (fraction of the travel): they do not hold the same thing
 
 
 class TruthObserver:
@@ -84,8 +85,8 @@ class RealBackend:
         self._read()
         tw.hand.q = self.q_meas.copy()                          # the next setpoint starts from where the arm is
         tw.advance(tw.data, tw.hand, q=self.q_meas)
-        if tw.hand.held and self.closure > CLOSED_ALL_THE_WAY:  # the twin thinks it holds something; the jaws say they met nothing
-            tw.hand.held = None
+        if tw.hand.held and (self.closure > CLOSED_ALL_THE_WAY or abs(self.closure - closure(tw, tw.data)) > DISAGREE):
+            tw.hand.held = None          # the twin's jaws stopped on an object; the real jaws did not (they went further): nothing is held
 
     def hand_pos(self, d=None):
         if d is not None:

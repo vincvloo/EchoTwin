@@ -82,7 +82,8 @@ class CameraObserver:
         plane = self.plane
         frame = self.source.frame()
         px = plane.to_pixel(expected_xy, z)
-        f = L.locate(frame, px, plane.metres_to_pixels(size_m, expected_xy, z))
+        size_px = plane.metres_to_pixels(size_m, expected_xy, z)
+        f = L.locate(frame, px, size_px, max_area=3.5 * size_px ** 2)      # a blob much bigger than the object is something else (the arm)
         if f is None:
             return None
         return plane.to_table(f.px, z)

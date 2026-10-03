@@ -25,7 +25,7 @@ class Found:
     found: bool = True
 
 
-def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH) -> Found | None:
+def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH, max_area: float | None = None) -> Found | None:
     """The blob nearest `expected_px` (x, y) that stands out from the table around it, or None.
     `size_px`: about how wide the object looks, in pixels (sets the window)."""
     h, w = bgr.shape[:2]
@@ -47,7 +47,7 @@ def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH)
     ex, ey = cx - x0, cy - y0
     for i in range(1, n):
         area = float(stats[i, cv2.CC_STAT_AREA])
-        if area < MIN_AREA_FRACTION * size_px ** 2:
+        if area < MIN_AREA_FRACTION * size_px ** 2 or (max_area is not None and area > max_area):
             continue
         dd = float(np.hypot(cents[i][0] - ex, cents[i][1] - ey))
         if dd > 1.6 * size_px + 8:                              # too far from where it should be: something else
