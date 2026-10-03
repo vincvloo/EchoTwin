@@ -24,11 +24,7 @@ DEFAULTS = {"grip": 1.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
 
 # ---------------- geometry of success ----------------
 def tilt_deg(world: World, name: str, d=None) -> float:
-    d = d if d is not None else world.data
-    q = d.qpos[world.obj_qadr[name] + 3:world.obj_qadr[name] + 7]
-    w, x, y, z = q
-    zz = 1 - 2 * (x * x + y * y)  # world-z component of the body's z axis
-    return float(np.degrees(np.arccos(np.clip(zz, -1, 1))))
+    return world.tilt(name, d)
 
 
 def goal_met(world: World, task: dict, d=None, hs=None) -> bool:
@@ -84,7 +80,7 @@ def waypoints(world: World, task: dict, skill: dict, d=None) -> list:
     h = world.half(me)
     goal = task["goal"]
     tallest = world.tallest()
-    carry_max = float(max(world.workspace.HEIGHTS[world.workspace.ok.any(axis=0)].max(), 0.06)) - 0.01
+    carry_max = world.carry_height()
     carry = float(min(tallest + h + skill["lift"], carry_max))
     off = world.grasp_offset(me)
     # pad tips low on the object; thin things need the tips right at the table
@@ -126,19 +122,20 @@ def waypoint_action(world: World, r: dict, d=None, hs=None):
 
 def imagine(world: World, task: dict, wps: list, speed: float) -> dict:
     """Run the whole move on a copy of the world and judge the result."""
-    d, hs = world.clone()
-    before = {n: world.obj_pos(n)[:2].copy() for n in world.things()}
-    r = {"wps": wps, "i": 0, "speed": speed, "yaw": world.grasp_yaw(task["object"])}
+    twin = world.twin                        # always imagined on the simulation, whatever robot will do it
+    d, hs = twin.clone()
+    before = {n: twin.obj_pos(n)[:2].copy() for n in twin.things()}
+    r = {"wps": wps, "i": 0, "speed": speed, "yaw": twin.grasp_yaw(task["object"])}
     path = []
     for _ in range(900):
-        a = waypoint_action(world, r, d, hs)
+        a = waypoint_action(twin, r, d, hs)
         if a is None:
             break
-        world.step(a, d, hs)
-        path.append(world.hand_pos(d))
+        twin.step(a, d, hs)
+        path.append(twin.hand_pos(d))
     for _ in range(25):  # let it settle
-        world.step(np.array([0, 0, 0, 0.0, r["yaw"]]), d, hs)
-    res = outcome(world, task, before, d, hs)
+        twin.step(np.array([0, 0, 0, 0.0, r["yaw"]]), d, hs)
+    res = outcome(twin, task, before, d, hs)
     res["path"] = np.array(path)
     return res
 
