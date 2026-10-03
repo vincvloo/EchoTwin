@@ -112,7 +112,7 @@ def build_xml(layout: Layout) -> str:
 
     return f"""
 <mujoco model="puppeteer">
-  <option timestep="0.002"/>
+  <option timestep="0.002" cone="elliptic" impratio="10"/>
   <visual>
     <global offwidth="1280" offheight="960"/>
     <quality shadowsize="4096"/>
@@ -134,7 +134,7 @@ def build_xml(layout: Layout) -> str:
     {"".join(scenery)}
     {"".join(fixed)}
     {"".join(props)}
-    <camera name="main" pos="0.0 -0.78 0.62" xyaxes="1 0 0 0 0.62 0.78"/>
+    <camera name="main" pos="0.55 -0.62 0.55" xyaxes="0.758 0.652 -0.000 -0.347 0.403 0.847"/>
     <camera name="top" pos="0 0 1.0" xyaxes="1 0 0 0 1 0"/>
     {f'<camera name="photo" pos="{_f(*layout.view["pos"])}" xyaxes="{_f(*layout.view["xyaxes"])}" fovy="{layout.view["fovy"]:.1f}"/>' if layout.view else ""}
   </worldbody>

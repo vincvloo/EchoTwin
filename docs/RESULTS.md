@@ -91,8 +91,10 @@ What this says:
   12 cm box is refused), objects thinner than 1.5 cm (a pinch cannot lift them off a table), anything or any spot
   outside the arm's reach (8 to 34 cm from its base, in the built-in arm). The check draws only reachable spots; the
   refusals have their own tests.
-- **The SO-ARM100 is experimental.** Its single moving jaw pushes the object against the fixed jaw and small objects
-  are sometimes ejected during the lift. It is selectable (`ARM=so_arm100`) and is not part of the numbers above.
+- **The SO-ARM100 does not hold up yet (19 % overall, 6 trials per cell).** Its single moving jaw presses the object
+  against the fixed jaw, and the grasp is much less forgiving than two symmetric pads: ball 83 / 67 / 0 %, box 50 /
+  33 / 0 %, cylinder and flat 0 %. It passes `--check` (a 4 cm cube and a 6 cm cylinder) but not the full table, so
+  the built-in arm is the default and the SO-ARM100 stays selectable (`ARM=so_arm100`) for work on it.
 
 Limits: one simulator, one built-in arm, boxes of fixed size, 12 trials per cell (one failure is 8 points). Treat it
 as a direction. The numbers will change when PR9 (skills from measurements) and PR12 (closed loop) land.

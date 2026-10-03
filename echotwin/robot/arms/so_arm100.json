@@ -1,6 +1,6 @@
 {
   "name": "so_arm100",
-  "about": "The SO-ARM100 (The Robot Studio) from MuJoCo Menagerie: 5 joints and one moving jaw. In our tests its single swinging jaw holds larger objects but squeezes small ones out when lifting; run --check to see how it does.",
+  "about": "The SO-ARM100 (The Robot Studio) from MuJoCo Menagerie: 5 joints and one moving jaw. It passes --check but not the full skill table yet (docs/RESULTS.md): a single swinging jaw is much less forgiving than two pads.",
   "mjcf": "models/arms/so_arm100/so_arm100.xml",
   "base_body": "Base",
   "mount_yaw_deg": 180,

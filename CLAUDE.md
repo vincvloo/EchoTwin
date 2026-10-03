@@ -12,7 +12,7 @@ Direction: make the simulation physically honest and the skills transferable, so
 - `echotwin/perception/`: photos/video -> VGGT cloud -> level and scale -> detector -> object map. GPU env.
 - `echotwin/scene/`: the contract between perception and robot (no heavy dependencies): `schema.py` (scene.json),
   `catalog.py` (class -> shape / movable), `to_twin.py`, `review.py`.
-- `echotwin/robot/`: MuJoCo twin, the server (dashboard, phone page, scans), router, skills, voice. Robot env.
+- `echotwin/robot/`: MuJoCo twin with a physical arm (`arm.py`, descriptors in `arms/`, see `docs/ARMS.md`), the server (dashboard, phone page, scans), router, skills, voice. Robot env. Sizes are real metres; a grasp is friction and force, so skills can fail: `python -m echotwin.robot.skillcheck`.
 - `apps/robot_ui/`: the dashboard and the phone page, served by the robot server. This is the only app.
 - `data/ out/ models/ certs/ third_party/` are local and git-ignored.
 - `docs/history/`: removed features (colour blocks, the sonar mobile base) and where to find their code.
@@ -22,6 +22,8 @@ Direction: make the simulation physically honest and the skills transferable, so
 python -m pytest -q tests/perception tests/scene               # perception env
 <robot python> -m pytest -q tests/robot tests/scene            # robot env
 <robot python> -m echotwin.robot.server                        # http://localhost:8000 (or .\launch.ps1)
+<robot python> -m echotwin.robot.skillcheck                    # success rate of each default skill on the arm
+<robot python> -m echotwin.robot.arm --check [NAME]            # test an arm descriptor
 python -m echotwin.perception.detectors                        # which detector will be used
 ```
 Two Python envs: perception (torch, VGGT, ultralytics, scipy, matplotlib) and robot (MuJoCo, FastAPI, OpenCV).
