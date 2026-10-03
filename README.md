@@ -47,6 +47,18 @@ On Linux or macOS use `bin/python` instead of `Scripts\python.exe`.
 Everything runs offline without API keys. `AI_API_KEY` (NVIDIA) adds object naming, phrasing and the review
 of detections; `ELEVENLABS_API_KEY` adds a voice.
 
+### Detection weights
+
+The detect step uses the best model you have in `models/` (git-ignored). The recommended one is YOLOE with text
+prompts; it finds cushions, rugs, speakers and names furniture correctly (`docs/RESULTS.md`). Fetch it once
+(about 270 MB from github.com/ultralytics/assets):
+
+```powershell
+.venv-perception\Scripts\python -m echotwin.perception.detectors --download
+```
+
+Without it, the plain YOLO11 model is used and downloaded on first use, as before.
+
 ### Phone scan: 3D or quick
 
 With `PERCEPTION_PY` set, a sweep scan from the phone builds a 3D model of the table (VGGT, YOLO, optional review).

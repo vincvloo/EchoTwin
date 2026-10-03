@@ -26,14 +26,17 @@ def build_scene(objects: list[dict], map_meta: dict | None = None, name: str = "
 
     Fills in shape / movable / surface from the catalog and which surface each object stands on.
     """
-    out = []
+    out, dropped = [], []
     for i, o in enumerate(objects):
         cls = str(o.get("class", "object"))
+        if catalog.normalize(cls) in catalog.TRANSIENT:
+            dropped.append(cls)
+            continue
         sx, sy = float(o.get("size_x", 0.1)), float(o.get("size_y", 0.1))
         h = o.get("height")
         info = catalog.classify(cls, sx, sy, h)
         out.append({
-            "id": f"o{i + 1}", "class": cls, "label": o.get("label") or info.get("label") or cls, "source": o.get("source", source),
+            "id": f"o{len(out) + 1}", "class": cls, "label": o.get("label") or info.get("label") or cls, "source": o.get("source", source),
             "conf": o.get("conf"), "x": float(o["x"]), "y": float(o["y"]), "size_x": sx, "size_y": sy,
             "height": None if h is None else float(h), "base_z": float(o.get("base_z", 0.0)),
             "shape": info["shape"], "movable": info["movable"], "surface": info["surface"], "on": None,
@@ -42,6 +45,8 @@ def build_scene(objects: list[dict], map_meta: dict | None = None, name: str = "
         })
     _assign_support(out)
     doc = {"format": FORMAT, "version": VERSION, "name": name, "map": map_meta or {}, "objects": out}
+    if dropped:
+        doc["dropped"] = dropped                              # people and hands: seen, but not part of the place
     if extra:
         doc.update(extra)
     validate(doc)

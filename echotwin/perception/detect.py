@@ -16,18 +16,19 @@ from pathlib import Path
 
 import numpy as np
 
-MODEL = Path(__file__).resolve().parents[2] / "models" / "yolo11s-seg.pt"     # kept outside the repo
+from echotwin.perception import detectors
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cloud", help=".ply written by video_to_ply.py (its .pix.npz must be next to it)")
-    ap.add_argument("--model", default=str(MODEL) if MODEL.exists() else "yolo11s-seg.pt",
-                    help="ultralytics segmentation weights (downloaded on first use if only a name)")
+    ap.add_argument("--model", default="auto",
+                    help="weights in models/, add :text for YOLOE with the catalog's text prompts; "
+                         "auto = the best one you have (see detectors.py)")
+    ap.add_argument("--download", action="store_true", help="let Ultralytics download missing weights")
     ap.add_argument("--conf", type=float, default=0.35, help="minimum detection confidence")
     a = ap.parse_args(argv)
     from PIL import Image
-    from ultralytics import YOLO
 
     pix = np.load(Path(a.cloud).with_suffix(".pix.npz"))
     frame, row, col = pix["frame"].astype(int), pix["row"].astype(int), pix["col"].astype(int)
@@ -35,7 +36,8 @@ def main(argv=None):
     n_frames = sum(1 for k in pix.files if k.startswith("frame_"))
     cls = np.full(len(frame), -1, np.int16)
     conf = np.zeros(len(frame), np.float32)
-    model = YOLO(a.model)
+    print(f"detector: {detectors.best_available() if a.model == 'auto' else a.model}")
+    model = detectors.load(a.model, download=a.download)
     names = model.names
     found = {}
     shots = Path(a.cloud).parent / (Path(a.cloud).stem + "_detections")

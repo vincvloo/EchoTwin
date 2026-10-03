@@ -1,0 +1,276 @@
+{
+  "_about": "Hand-written from looking at examples/*. Scene level, lenient on purpose: an expected item counts as found when a detection with one of its accepted names shows up in at least min_photos photos. Names are lower case.",
+  "scenes": {
+    "lounge_photos": {
+      "folder": "examples/lounge_photos",
+      "items": [
+        {
+          "id": "sofa",
+          "names": [
+            "couch",
+            "sofa",
+            "loveseat",
+            "settee"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "armchair",
+          "names": [
+            "chair",
+            "armchair",
+            "seat",
+            "easy chair",
+            "lounge chair"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "plant",
+          "names": [
+            "potted plant",
+            "plant",
+            "houseplant",
+            "house plant",
+            "monstera",
+            "indoor plant"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "bottle",
+          "names": [
+            "bottle",
+            "water bottle",
+            "plastic bottle"
+          ],
+          "min_photos": 2
+        },
+        {
+          "id": "side table",
+          "names": [
+            "dining table",
+            "table",
+            "coffee table",
+            "side table",
+            "end table",
+            "round table",
+            "desk"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "cushion",
+          "names": [
+            "pillow",
+            "cushion",
+            "throw pillow",
+            "yellow pillow",
+            "yellow cushion"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "rug",
+          "names": [
+            "rug",
+            "carpet",
+            "mat",
+            "area rug"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "black planter",
+          "names": [
+            "vase",
+            "planter",
+            "pot",
+            "flowerpot",
+            "flower pot",
+            "bowl",
+            "stool",
+            "black vase",
+            "ottoman"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "red shelf",
+          "names": [
+            "shelf",
+            "stand",
+            "lectern",
+            "cabinet",
+            "table",
+            "desk",
+            "podium",
+            "side table",
+            "dining table",
+            "bookshelf"
+          ],
+          "min_photos": 2
+        },
+        {
+          "id": "speaker",
+          "names": [
+            "speaker",
+            "loudspeaker",
+            "subwoofer",
+            "monitor speaker",
+            "studio monitor",
+            "tv",
+            "box"
+          ],
+          "min_photos": 1
+        },
+        {
+          "id": "screen",
+          "names": [
+            "projection screen",
+            "projector screen",
+            "screen",
+            "tv",
+            "monitor",
+            "whiteboard",
+            "blind"
+          ],
+          "min_photos": 2
+        },
+        {
+          "id": "banner",
+          "names": [
+            "sign",
+            "banner",
+            "poster",
+            "billboard",
+            "signboard"
+          ],
+          "min_photos": 2
+        }
+      ],
+      "ignore": [
+        "person",
+        "wall",
+        "floor",
+        "window",
+        "curtain",
+        "curtains",
+        "ceiling",
+        "door",
+        "platform",
+        "stage",
+        "wood",
+        "light",
+        "lamp",
+        "floor lamp",
+        "remote",
+        "remote control",
+        "cable",
+        "cord",
+        "frame",
+        "picture frame",
+        "painting",
+        "bench",
+        "sink"
+      ]
+    },
+    "table_photos": {
+      "folder": "examples/table_photos",
+      "items": [
+        {
+          "id": "glass",
+          "names": [
+            "cup",
+            "wine glass",
+            "glass",
+            "drinking glass",
+            "tumbler",
+            "mug",
+            "water glass",
+            "vase",
+            "bottle",
+            "bowl"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "chocolate",
+          "names": [
+            "chocolate",
+            "chocolate bar",
+            "candy bar",
+            "candy",
+            "packet",
+            "package",
+            "card",
+            "book",
+            "box",
+            "sandwich",
+            "cell phone",
+            "remote",
+            "business card",
+            "wallet",
+            "pack"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "earbud case",
+          "names": [
+            "earbud case",
+            "earbuds case",
+            "case",
+            "mouse",
+            "computer mouse",
+            "stone",
+            "pebble",
+            "remote",
+            "cell phone",
+            "egg",
+            "charging case",
+            "earbuds",
+            "headphones"
+          ],
+          "min_photos": 3
+        },
+        {
+          "id": "charger",
+          "names": [
+            "charger",
+            "adapter",
+            "power adapter",
+            "laptop charger",
+            "power supply",
+            "cable",
+            "cord",
+            "laptop",
+            "mouse",
+            "remote",
+            "box",
+            "power brick"
+          ],
+          "min_photos": 2
+        }
+      ],
+      "ignore": [
+        "dining table",
+        "table",
+        "desk",
+        "person",
+        "hand",
+        "arm",
+        "finger",
+        "wall",
+        "floor",
+        "cable clip",
+        "clip",
+        "sleeve",
+        "shirt",
+        "jacket",
+        "bag",
+        "chair"
+      ]
+    }
+  }
+}

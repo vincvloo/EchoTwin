@@ -47,3 +47,13 @@ def test_a_tiny_dining_table_is_a_small_object_not_a_table():
     assert catalog.classify("dining table", 0.07, 0.06, 0.02)["shape"] == "flat"
     big = catalog.classify("dining table", 0.83, 1.11, 0.23)
     assert big["surface"] and not big["movable"] and "label" not in big
+
+
+def test_people_and_hands_do_not_become_part_of_the_scene():
+    from echotwin.scene import schema
+    sc = schema.build_scene([
+        {"class": "person", "x": 0, "y": 0, "size_x": 0.2, "size_y": 0.2, "height": 0.3},
+        {"class": "cup", "x": 1, "y": 0, "size_x": 0.08, "size_y": 0.08, "height": 0.1},
+        {"class": "Hand", "x": 2, "y": 0, "size_x": 0.1, "size_y": 0.1, "height": 0.05}])
+    assert [o["class"] for o in sc["objects"]] == ["cup"] and sc["objects"][0]["id"] == "o1"
+    assert sc["dropped"] == ["person", "Hand"]
