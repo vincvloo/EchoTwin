@@ -53,3 +53,16 @@ def test_the_hand_written_ground_truth_is_well_formed():
         ids = [i["id"] for i in scene["items"]]
         assert len(ids) == len(set(ids)) and all(i["names"] and i.get("min_photos", 2) >= 1 for i in scene["items"])
         assert len(list((B.REPO / scene["folder"]).glob("*.jpg"))) >= 10                  # the example photos exist
+
+
+def test_one_wrong_name_cannot_satisfy_several_items():
+    scene = {"items": [{"id": "chocolate", "names": ["candy", "remote"], "min_photos": 2},
+                       {"id": "case", "names": ["case", "remote"], "min_photos": 2},
+                       {"id": "charger", "names": ["charger", "remote"], "min_photos": 2}], "ignore": []}
+    dets = {"a": [("remote", .9)], "b": [("remote", .9)]}
+    m = B.score_scene(scene, dets)
+    assert len(m["found"]) == 1 and len(m["missing"]) == 2                   # "remote" counts once, not three times
+    dets["a"].append(("charger", .9))
+    dets["b"].append(("charger", .9))
+    m = B.score_scene(scene, dets)
+    assert "charger" in m["found"] and len(m["found"]) == 2                  # the charger keeps its own name; remote goes to another

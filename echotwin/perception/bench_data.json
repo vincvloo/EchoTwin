@@ -1,5 +1,5 @@
 {
-  "_about": "Hand-written from looking at examples/*. Scene level, lenient on purpose: an expected item counts as found when a detection with one of its accepted names shows up in at least min_photos photos. Names are lower case.",
+  "_about": "Hand-written from looking at examples/*. Scene level: an expected item counts as found when a detection with one of its accepted names shows up in at least min_photos photos, and one detected name satisfies one item only. Accepted names are names that are correct for the object (synonyms), not look-alikes. Names are lower case.",
   "scenes": {
     "lounge_photos": {
       "folder": "examples/lounge_photos",
@@ -54,8 +54,7 @@
             "coffee table",
             "side table",
             "end table",
-            "round table",
-            "desk"
+            "round table"
           ],
           "min_photos": 3
         },
@@ -89,7 +88,6 @@
             "flowerpot",
             "flower pot",
             "bowl",
-            "stool",
             "black vase",
             "ottoman"
           ],
@@ -118,9 +116,7 @@
             "loudspeaker",
             "subwoofer",
             "monitor speaker",
-            "studio monitor",
-            "tv",
-            "box"
+            "studio monitor"
           ],
           "min_photos": 1
         },
@@ -129,11 +125,7 @@
           "names": [
             "projection screen",
             "projector screen",
-            "screen",
-            "tv",
-            "monitor",
-            "whiteboard",
-            "blind"
+            "screen"
           ],
           "min_photos": 2
         },
@@ -188,9 +180,7 @@
             "tumbler",
             "mug",
             "water glass",
-            "vase",
-            "bottle",
-            "bowl"
+            "wineglass"
           ],
           "min_photos": 3
         },
@@ -203,15 +193,9 @@
             "candy",
             "packet",
             "package",
-            "card",
-            "book",
-            "box",
-            "sandwich",
-            "cell phone",
-            "remote",
-            "business card",
-            "wallet",
-            "pack"
+            "pack",
+            "snack",
+            "wrapper"
           ],
           "min_photos": 3
         },
@@ -221,16 +205,9 @@
             "earbud case",
             "earbuds case",
             "case",
-            "mouse",
-            "computer mouse",
-            "stone",
-            "pebble",
-            "remote",
-            "cell phone",
-            "egg",
             "charging case",
             "earbuds",
-            "headphones"
+            "headphone case"
           ],
           "min_photos": 3
         },
@@ -242,13 +219,8 @@
             "power adapter",
             "laptop charger",
             "power supply",
-            "cable",
-            "cord",
-            "laptop",
-            "mouse",
-            "remote",
-            "box",
-            "power brick"
+            "power brick",
+            "converter"
           ],
           "min_photos": 2
         }

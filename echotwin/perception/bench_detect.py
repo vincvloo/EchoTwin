@@ -3,10 +3,12 @@
     python -m echotwin.perception.bench_detect yolo11s-seg.pt yolo26s-seg.pt yoloe-26s-seg-pf.pt yoloe-26s-seg.pt:text
 
 Each model is a weights file in models/ (git-ignored). Add ":text" to an open-vocabulary YOLOE model to give it a
-text prompt list instead of its built-in names. Missing weights are only downloaded with --download.
+text prompt list instead of its built-in names: ":text" is the catalog's list, ":text=lvis" (or coco, objects365) a
+public vocabulary, ":text=file.txt" your own. Missing weights are only downloaded with --download.
 
 What is measured, per model and scene (a scene = one folder of photos, see bench_data.json):
   recall       expected objects found: a detection with one of the item's accepted names, in enough photos
+               (a detected name satisfies one item only)
   false rate   share of detections whose name matches no expected item and is not on the ignore list
   false names  those names, when they show up in 2 or more photos
   ms / photo   time per photo after a warm-up, and peak GPU memory
@@ -46,12 +48,22 @@ def score_scene(scene: dict, detections: dict[str, list[tuple[str, float]]], con
             total += 1
             if name not in accepted and name not in ignore:
                 false += 1
-    found, missing, seen = [], [], {}
-    for it in items:
-        names = {n.lower() for n in it["names"]}
-        photos = set().union(*(photos_with.get(n, set()) for n in names)) if names else set()
+    # One detected name can satisfy only one expected item (otherwise "remote" would count as the chocolate, the
+    # earbud case and the charger at once). Items with the fewest candidate names choose first.
+    found, missing, seen, taken = [], [], {}, set()
+    order = sorted(items, key=lambda it: sum(n.lower() in photos_with for n in it["names"]))
+    for it in order:
+        names = {n.lower() for n in it["names"]} - taken
+        present = {n for n in names if n in photos_with}
+        photos = set().union(*(photos_with[n] for n in present)) if present else set()
         seen[it["id"]] = len(photos)
-        (found if len(photos) >= it.get("min_photos", 2) else missing).append(it["id"])
+        if len(photos) >= it.get("min_photos", 2):
+            found.append(it["id"])
+            taken |= present
+        else:
+            missing.append(it["id"])
+    found = [it["id"] for it in items if it["id"] in found]
+    missing = [it["id"] for it in items if it["id"] in missing]
     false_names = sorted(n for n, ps in photos_with.items() if len(ps) >= 2 and n not in accepted and n not in ignore)
     return {"recall": len(found) / len(items), "found": found, "missing": missing, "photos_seen": seen,
             "detections": total, "per_photo": total / max(1, len(detections)),

@@ -22,7 +22,7 @@ def test_auto_prefers_the_open_vocabulary_model_when_its_weights_exist(models):
     (models / "yolo11s-seg.pt").write_bytes(b"x")
     assert D.best_available() == "yolo11s-seg.pt"
     (models / "yoloe-26s-seg.pt").write_bytes(b"x")
-    assert D.best_available() == "yoloe-26s-seg.pt:text"
+    assert D.best_available() == "yoloe-26s-seg.pt:text=objects365"          # a public vocabulary, not our own list
 
 
 def test_missing_weights_are_not_downloaded_unless_asked(models):
@@ -38,3 +38,19 @@ def test_the_prompt_list_is_a_clean_generic_vocabulary():
     assert len(catalog.PROMPTS) >= 40 and len(set(catalog.PROMPTS)) == len(catalog.PROMPTS)
     assert all(p == p.lower() and p.strip() == p for p in catalog.PROMPTS)
     assert {"couch", "chair", "potted plant", "bottle", "cup"} <= set(catalog.PROMPTS)     # the common ones
+
+
+def test_the_vocabulary_can_be_chosen(models, monkeypatch, tmp_path):
+    assert D.split("yoloe.pt:text") == ("yoloe.pt", "catalog")
+    assert D.split("yoloe.pt:text=lvis") == ("yoloe.pt", "lvis")
+    assert D.split("yolo11s-seg.pt") == ("yolo11s-seg.pt", None)
+    assert D.split("C:\\models\\yoloe.pt:text=my.txt") == ("C:\\models\\yoloe.pt", "my.txt")        # the drive colon is not a suffix
+    (models / "yoloe-26s-seg.pt").write_bytes(b"x")
+    monkeypatch.setenv("DETECT_PROMPTS", "lvis")
+    assert D.best_available() == "yoloe-26s-seg.pt:text=lvis"
+    words = tmp_path / "words.txt"
+    words.write_text("Sofa\n# a comment\ncoffee_table\nsofa\n\n", encoding="utf-8")
+    assert D.prompt_set(str(words)) == ["sofa", "coffee table"]                          # lower case, no comments, no repeats
+    assert D.prompt_set("coco")[:2] == ["person", "bicycle"] and len(D.prompt_set("coco")) == 80
+    with pytest.raises(SystemExit):
+        D.prompt_set("no-such-list")

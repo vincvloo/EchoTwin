@@ -50,14 +50,16 @@ of detections; `ELEVENLABS_API_KEY` adds a voice.
 ### Detection weights
 
 The detect step uses the best model you have in `models/` (git-ignored). The recommended one is YOLOE with text
-prompts; it finds cushions, rugs, speakers and names furniture correctly (`docs/RESULTS.md`). Fetch it once
-(about 270 MB from github.com/ultralytics/assets):
+prompts and a public list of 365 names (Objects365); it finds cushions, rugs and coffee tables and names furniture
+correctly (`docs/RESULTS.md`). Fetch it once (about 270 MB from github.com/ultralytics/assets):
 
 ```powershell
 .venv-perception\Scripts\python -m echotwin.perception.detectors --download
 ```
 
-Without it, the plain YOLO11 model is used and downloaded on first use, as before.
+Without it, the plain YOLO11 model is used and downloaded on first use, as before. To look for other things, put
+one name per line in a text file and set `DETECT_PROMPTS=my_words.txt` in `.env` (or `lvis`, `coco`, `catalog`).
+Small objects on a table are still hard to name for every detector; the review step (`AI_API_KEY`) helps.
 
 ### Phone scan: 3D or quick
 
