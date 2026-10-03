@@ -83,16 +83,20 @@ def trial(shape: str, task_name: str, rng: np.random.Generator) -> dict:
         probe = World(Layout())
     except Exception:
         pass
-    (ax, ay), (bx, by) = _spawn(rng, probe, k)
-    lay = Layout()
-    lay.props = [_prop("mover", shape, SHAPES[shape], (ax, ay), k), _prop("other", "box", OTHER, (bx, by), k)]
-    w = World(lay)
-    w.settle(20)
-    plan = {"prop": 0, "goal": ("near", 1, task_name) if task_name != "to the left" else ("dir", (-1, 0), 0.12 * k)}
-    if hasattr(w, "can_grasp") and not w.can_grasp("prop_0"):
-        return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0}
-    if hasattr(w, "reachable") and not w.reachable(w.obj_pos("prop_0")[:2]):
-        return {"ok": False, "why": "refused: out of reach", "seconds": 0.0}
+    for _ in range(60):             # draw until the arm can reach both the object and the spot (else it would decline)
+        (ax, ay), (bx, by) = _spawn(rng, probe, k)
+        lay = Layout()
+        lay.props = [_prop("mover", shape, SHAPES[shape], (ax, ay), k), _prop("other", "box", OTHER, (bx, by), k)]
+        w = World(lay)
+        w.settle(20)
+        plan = {"prop": 0, "goal": ("near", 1, task_name) if task_name != "to the left" else ("dir", (-1, 0), 0.12 * k)}
+        if not hasattr(w, "refusal"):
+            break
+        if w.can_grasp("prop_0")[0] is False:
+            return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0}
+        goal = MT.goal_xy(w, plan)
+        if not w.refusal("prop_0", goal):
+            break
     task = make_task(w, plan, f"put the mover {task_name}")
     wps = PS.waypoints(w, task, dict(PS.DEFAULTS))
     before = {n: w.obj_pos(n)[:2].copy() for n in w.things()}

@@ -18,7 +18,7 @@ ASK = 1.0
 KIND_WORDS = {"flat": "a flat thing like that", "box": "a box like that", "cylinder": "a glass-like thing",
               "round": "a round thing like that"}
 KIND_LABEL = {"flat": "flat things", "box": "boxes", "cylinder": "glasses & bottles", "round": "round things"}
-DEFAULTS = {"grip": 0.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
+DEFAULTS = {"grip": 1.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
 
 
 # ---------------- geometry of success ----------------
@@ -86,7 +86,8 @@ def waypoints(world: World, task: dict, skill: dict, d=None) -> list:
     carry_max = float(max(world.workspace.HEIGHTS[world.workspace.ok.any(axis=0)].max(), 0.06)) - 0.01
     carry = float(min(tallest + h + skill["lift"], carry_max))
     off = world.grasp_offset(me)
-    grasp_z = float(max(o[2] - h + 0.004 + (skill["grip"] + 1.0) * h * 0.3, 0.004))   # pad tips low on the object
+    # pad tips low on the object; thin things need the tips right at the table
+    grasp_z = float(max(o[2] - h + 0.004 + (skill["grip"] + 1.0) * h * 0.3 * min(1.0, h / 0.03), 0.004))
     release_z = float(max(h + skill["drop"] + 0.002, 0.013))
     if task.get("stack"):  # set it down on top of the other object
         ref = task["ref"]
