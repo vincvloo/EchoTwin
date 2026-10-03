@@ -7,6 +7,7 @@ import time
 
 import cv2
 
+from ...perception import marker as MK
 from ..features import everyday as EV
 from ..features import imageutil as IMG
 from ..scene import Layout
@@ -22,10 +23,13 @@ async def import_photos(frames: list[bytes], pitches: list, ctx: TwinContext) ->
 
 async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) -> None:
     scores = [IMG.sharpness(IMG.decode(f)) for f in frames]
-    k = max(range(len(frames)), key=lambda i: scores[i])
+    seen = await asyncio.to_thread(lambda: [i for i, f in enumerate(frames) if MK.detect(IMG.decode(f)) is not None])
+    k = max(seen or range(len(frames)), key=lambda i: scores[i])         # a photo that shows the marker, if any
     pitch = pitches[k] if k < len(pitches) else None
     ctx.progress("everyday", {"pitch": pitch})
-    res = await asyncio.to_thread(EV.analyse, frames[k], pitch)
+    res = await asyncio.to_thread(EV.analyse, frames[k], pitch, MK.size_m())
+    ctx.say("I found the marker, so the sizes are measured." if res["calibration"]["source"] == "marker" else
+            "No marker in the photos, so sizes are estimated and can be off. Print one: see the capture guide.")
     sid, out = ctx.new_dir()
     EV.apply_names(res, None)
     props, tex, ann = await asyncio.to_thread(EV.build, res, out)
@@ -37,7 +41,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     ai = ctx.ask_ai_json is not None
     summary = {"id": sid, "mode": "everyday", "frames": len(frames), "views": 1, "fallback": False,
                "objects": {}, "unsure": [], "thumbs": [], "twin": f"/scans/{sid}/twin.jpg",
-               "texture": f"/scans/{sid}/table.png", "seconds": 0, "pitch": res["pitch"],
+               "texture": f"/scans/{sid}/table.png", "seconds": 0, "pitch": res["pitch"], "calibration": res["calibration"],
                "props": [p["name"] for p in props],
                "greeting": (f"I've mapped your table. I see {n} thing{'s' if n != 1 else ''} on it. Let me look closer."
                             if n and ai else EV.greeting(res["items"]))}
