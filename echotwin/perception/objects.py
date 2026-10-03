@@ -18,7 +18,7 @@ from scipy import ndimage
 
 from echotwin.scene import catalog
 from echotwin.scene import schema as scene_schema
-from echotwin.perception.mapping import (UP, add_scale_args, align_walls, level_floor, load_points,
+from echotwin.perception.mapping import (UP, add_scale_args, affine4, align_walls, level_floor, load_points, marker_frame,
                                    points_to_grid, resolve_scale)
 
 
@@ -179,6 +179,7 @@ def main(argv=None):
     ap.add_argument("--res", type=float, default=0.03)
     ap.add_argument("--band", type=float, nargs=2, default=(0.05, 0.35))
     ap.add_argument("--floor-offset", type=float, default=0.0, metavar="H")
+    ap.add_argument("--no-marker", action="store_true", help="ignore a .marker.json next to the cloud")
     ap.add_argument("--min-views", type=int, default=2, help="photos that must agree on a cell")
     ap.add_argument("--min-area", type=float, default=0.02, metavar="M2",
                     help="smallest object footprint in m2 (a tabletop needs about 0.0015)")
@@ -186,12 +187,28 @@ def main(argv=None):
     a = ap.parse_args(argv)
     lab = np.load(Path(a.cloud).with_suffix(".labels.npz"))
     names = {int(k): v for k, v in json.loads(str(lab["names"])).items()}
-    pts = load_points(a.cloud, up=a.up, scale=resolve_scale(a), voxel=0)   # voxel=0 keeps point order
+    scale = resolve_scale(a)
+    pts, info = load_points(a.cloud, up=a.up, scale=scale, voxel=0, return_info=True)   # voxel=0 keeps point order
     if len(pts) != len(lab["cls"]):
         raise SystemExit(f"{len(pts)} points but {len(lab['cls'])} labels: rerun label_objects.py on this cloud")
-    pts, *_ = level_floor(pts, np.random.default_rng(0))
-    pts = pts - [0, 0, a.floor_offset]
-    pts, *_ = align_walls(pts)
+    marker = None
+    mpath = Path(a.cloud).with_suffix(".marker.json")
+    if mpath.exists() and not a.no_marker:
+        marker = json.loads(mpath.read_text())
+        marker = marker if marker.get("reliable") else None
+    S = scale * info["R"]                                     # cloud -> loaded frame (the part before levelling)
+    if marker:                                                # the table is the plane the marker lies on
+        o, Rm = marker_frame(marker, info["R"], scale)
+        pts = (pts - o) @ Rm.T
+        A, b = Rm @ S, -Rm @ o
+        print("frame from the marker: table top at z = 0, origin at the marker, x along it")
+        if tuple(a.band) == (0.05, 0.35):                      # the table top is exact now: thin things (a book, a bar) count
+            a.band = (0.012, 0.35)
+    else:
+        pts, _, _, (centroid, Rl) = level_floor(pts, np.random.default_rng(0))
+        pts = pts - [0, 0, a.floor_offset]
+        pts, _, Rz = align_walls(pts)
+        A, b = Rz @ Rl @ S, Rz @ (-Rl @ centroid - [0, 0, a.floor_offset])
     gmap = points_to_grid(pts, res=a.res, band=tuple(a.band))
     gmap.save(a.out)
     pixels = None
@@ -205,7 +222,10 @@ def main(argv=None):
     meta = {"origin": [round(gmap.origin[0], 4), round(gmap.origin[1], 4)], "res": gmap.res,
             "width": gmap.W, "height": gmap.H}                   # lets run_demo check it is the same map
     Path(f"{a.out}_objects.json").write_text(json.dumps({"map": meta, "objects": objects}, indent=1))
-    scene_doc = scene_schema.build_scene(objects, meta, name=Path(a.out).name)   # what the robot twin reads
+    cal = {"source": "marker" if marker else "estimate", "scale": float(scale), "cloud_to_map": affine4(A, b).tolist()}
+    if marker:
+        cal.update({k: marker[k] for k in ("photos_seen", "photos_total", "spread", "side_units") if k in marker})
+    scene_doc = scene_schema.build_scene(objects, meta, name=Path(a.out).name, extra={"calibration": cal})   # what the robot twin reads
     scene_schema.save(scene_doc, f"{a.out}_scene.json")
     draw(gmap, objects, label_img, f"{a.out}_objects.png")
     draw(gmap, objects, label_img, f"{a.out}_objects_clean.png", clean=True)

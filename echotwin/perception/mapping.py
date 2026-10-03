@@ -203,6 +203,24 @@ def points_to_grid(pts, res=0.03, band=(0.05, 0.35), floor_tol=0.03, min_pts=2, 
     return GridMap(occ=occ, res=res, origin=(float(xy_min[0]), float(xy_min[1])), known=known)
 
 
+def marker_frame(marker: dict, R_up: np.ndarray, scale: float):
+    """(origin, R) of the table frame the marker defines, in the loaded cloud (scaled, +z up): x along the marker's
+    top edge, z its normal, the origin at its centre. `marker` holds the vectors in the cloud's own frame."""
+    o = scale * (R_up @ np.array(marker["origin"], float))
+    z = R_up @ np.array(marker["normal"], float)
+    z /= np.linalg.norm(z)
+    x = R_up @ np.array(marker["x_axis"], float)
+    x = x - (x @ z) * z
+    x /= np.linalg.norm(x)
+    return o, np.stack([x, np.cross(z, x), z])
+
+
+def affine4(A: np.ndarray, b: np.ndarray) -> np.ndarray:
+    M = np.eye(4)
+    M[:3, :3], M[:3, 3] = A, b
+    return M
+
+
 def add_scale_args(ap):
     ap.add_argument("--scale", type=float, default=1.0,
                     help="multiply the scan coordinates by this factor (for scans without metric units)")

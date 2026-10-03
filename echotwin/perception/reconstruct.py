@@ -18,6 +18,7 @@ On the RTX 2050 (4 GB): 8 frames ~1.5 min, 20 frames ~5.5 min (peak 4.8 GB spill
 Film with the floor (or the table top) in view, phone pointing down.
 """
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -139,6 +140,9 @@ def main(argv=None):
     ap.add_argument("--conf", type=float, default=50, help="drop the least confident N %% of pixels")
     ap.add_argument("--cam-height", type=float, default=0.45,
                     help="typical phone height above the floor during capture (m), for the scale hint")
+    ap.add_argument("--marker-cm", type=float, default=None,
+                    help="side of the printed marker (default MARKER_SIZE_CM, or 10); it gives the true scale")
+    ap.add_argument("--no-marker", action="store_true", help="do not look for the marker")
     a = ap.parse_args(argv)
     import torch       # heavy imports here so the module (and upright()) loads without the VGGT env
     import trimesh
@@ -172,6 +176,10 @@ def main(argv=None):
     conf = pred["depth_conf"][0].float().cpu().numpy()
     extr, intr = extr[0].cpu().numpy(), intr[0].cpu().numpy()
     pts = unproject_depth_map_to_point_map(depth, extr, intr)             # (S, H, W, 3)
+    cal = None
+    if not a.no_marker:
+        from . import marker, marker_scale
+        cal = marker_scale.from_photos(hi, pts, extr, intr, a.marker_cm / 100 if a.marker_cm else marker.size_m())
     keep = conf >= np.percentile(conf, a.conf)
     rgb = (imgs.permute(0, 2, 3, 1).numpy()[keep] * 255).astype(np.uint8)
     pts = pts[keep]
@@ -192,10 +200,28 @@ def main(argv=None):
     trimesh.PointCloud(pts, colors=np.column_stack([rgb, np.full(len(rgb), 255, np.uint8)])).export(a.out)
     ext = np.ptp(pts, axis=0)
     print(f"wrote {a.out}: {len(pts):,} points, extent {ext[0]:.2f} x {ext[1]:.2f} x {ext[2]:.2f} (VGGT units, Y up)")
+    scale = a.cam_height / max(cam_h, 1e-6)
+    marker_json = Path(a.out).with_suffix(".marker.json")
+    if marker_json.exists():
+        marker_json.unlink()                                   # never keep the calibration of an older scan
+    if cal is not None:
+        Rm = Rup                                               # the marker's vectors, in the same upright frame as the cloud
+        cal = {**cal, **{k: (Rm @ np.array(cal[k])).tolist() for k in ("origin", "x_axis", "normal")}}
+        marker_json.write_text(json.dumps(cal, indent=1))
+        if cal["reliable"]:
+            scale = cal["scale"]
+            print(f"marker: seen in {cal['photos_seen']} of {cal['photos_total']} photos, the photos agree within "
+                  f"{cal['spread'] * 100:.1f} % | scale hint from the marker (true scale): --scale {scale:.4f}")
+        else:
+            print(f"marker: seen in {cal['photos_seen']} of {cal['photos_total']} photos but the readings disagree "
+                  f"({cal['spread'] * 100:.0f} %): not used")
+    elif not a.no_marker:
+        print("marker: not seen")
+    src_note = "the marker" if cal is not None and cal["reliable"] else "the phone height"
     print(f"camera height above floor: {cam_h:.3f} units | scale hint if you held the phone at "
           f"{a.cam_height:.2f} m: --scale {a.cam_height / max(cam_h, 1e-6):.3f}")
     print(f"next: python -m echotwin.perception.detect {a.out}, then python -m echotwin.perception.objects {a.out} "
-          f"-o out/{Path(a.out).stem} --up y --scale {a.cam_height / max(cam_h, 1e-6):.3f}")
+          f"-o out/{Path(a.out).stem} --up y --scale {scale:.3f}   (scale from {src_note})")
     print(f"total {time.time()-t0:.0f} s")
 
 

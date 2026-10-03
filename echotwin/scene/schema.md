@@ -32,6 +32,22 @@ The one file that perception writes and the rest of EchoTwin reads. Metres, in t
 
 ## From scene to twin
 
+### `calibration` (optional)
+
+Where the metres come from. Written by `objects.py`; a scene without it is still valid.
+
+```json
+"calibration": {"source": "marker", "scale": 0.0412, "photos_seen": 4, "photos_total": 5, "spread": 0.013,
+                "side_units": 2.43, "cloud_to_map": [[...4 x 4...]]}
+```
+
+| Field | Meaning |
+|---|---|
+| `source` | `marker`: the printed marker gave the scale, the table plane (z = 0) and the origin. `estimate`: the scale is a guess from the phone height and the floor is the lowest surface; sizes can be off by a factor of two |
+| `scale` | Metres per unit of the 3D reconstruction |
+| `photos_seen`, `photos_total`, `spread` | Marker readings: photos that showed it, photos used, how well they agree (std / mean of the side length) |
+| `cloud_to_map` | 4 x 4, takes a point of the reconstruction (the `.ply`, +Y up) to this file's map frame. Used to paint the table texture from the photos |
+
 The robot works on a table, so `to_twin` picks a table-sized window: a surface that holds small things, or
 else the densest group of small things. Movable objects in the window become objects to move, furniture that
 reaches into it becomes a fixed obstacle (clipped to the window), and the rest is left out. The window is
