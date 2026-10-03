@@ -22,9 +22,10 @@ In this order. Each step is only meaningful once the one before it is solid.
       a skill is planned from the demos of similar sizes, so any detected name works. Result (`docs/RESULTS.md`): same
       success as the shape label, plus the robot asks only when the size is new. Open: learned skills do not beat the tuned
       defaults, because practice keeps every success at random styles (for PR13).
-- [ ] **PR10 Calibration.** A printed marker (AprilTag) on the table gives a true scale and the camera pose relative to
-      the table, so perception is metric (today the scale is a guess from the phone height). Also builds the table
-      texture in 3D mode (the cloud loader drops colours today).
+- [x] **PR10 Calibration.** A printed marker (AprilTag, `perception/marker.py`) on the table gives the true scale, the
+      table plane and the origin in 3D scans, and the camera height and angle in quick mode; 3D scans also get a table
+      texture painted from the photos. Tested on synthetic scenes only. Open: check it on a real capture with a printed
+      marker (error against a measured object), and place the real arm's base by the marker (PR11).
 - [ ] **PR11 One skill interface, two back-ends.** Skills output end-effector poses and gripper commands in metres;
       the simulator and a real arm both implement it. A record of success rate in sim vs real on the same task.
 - [ ] **PR12 Closed loop.** Re-detect the object before the grasp, check the gripper closed on something, retry.

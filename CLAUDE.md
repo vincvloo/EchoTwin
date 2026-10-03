@@ -25,6 +25,7 @@ python -m pytest -q tests/perception tests/scene               # perception env
 <robot python> -m echotwin.robot.skillcheck                    # success rate of each default skill on the arm
 <robot python> -m echotwin.robot.arm --check [NAME]            # test an arm descriptor
 python -m echotwin.perception.detectors                        # which detector will be used
+python -m echotwin.perception.marker --print out/marker.png    # the calibration marker to print (true scale)
 ```
 Two Python envs: perception (torch, VGGT, ultralytics, scipy, matplotlib) and robot (MuJoCo, FastAPI, OpenCV).
 `.env` holds `PERCEPTION_PY`, `ROBOT_PY` and the API keys (never commit it). Paths in `.env` are relative to the repo.

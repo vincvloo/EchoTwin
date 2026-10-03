@@ -350,10 +350,15 @@ function onPipeline(m) {
   } else if (m.state === 'skipped') $('#scanStatus').textContent = 'Skipped: using quick mode…';
 }
 $('#pipeSkip').onclick = () => send({ t: 'scan_skip' });
+function calText(s) {
+  const c = s.calibration;
+  if (c && c.source === 'marker') return ` · sizes measured with the marker (${c.photos_seen} of ${c.photos_total} photos)`;
+  return ' · sizes estimated (no marker: can be off by a factor of two)';
+}
 function renderScan(s) {
   if (s.mode === 'scan3d') {
     $('#scanStatus').textContent = `3D model: ${s.props.length} object${s.props.length !== 1 ? 's' : ''} to move` +
-      `${s.obstacles.length ? ', ' + s.obstacles.length + ' fixed' : ''}${s.review && s.review.model ? ' · checked by ' + s.review.model : ''}.`;
+      `${s.obstacles.length ? ', ' + s.obstacles.length + ' fixed' : ''}${s.review && s.review.model ? ' · checked by ' + s.review.model : ''}${calText(s)}.`;
     $('#twin').src = s.twin + '?' + Date.now(); $('#thumbs').innerHTML = '';
     $('#dets').innerHTML = '<tr><th>#</th><th>Object</th></tr>' + (s.props || []).map((n, i) => `<tr><td>${i + 1}</td><td>${esc(n)}</td></tr>`).join('') +
       (s.obstacles || []).map(n => `<tr><td></td><td>${esc(n)} <span style="color:var(--dim)">(fixed)</span></td></tr>`).join('');
@@ -366,7 +371,7 @@ function renderScan(s) {
     return;
   }
   if (s.mode === 'everyday') {
-    $('#scanStatus').textContent = `Everyday objects from one photo${s.pitch ? ', camera tilt ' + Math.round(s.pitch) + '°' : ''}. Approximate map.`;
+    $('#scanStatus').textContent = `Everyday objects from one photo${s.pitch ? ', camera tilt ' + Math.round(s.pitch) + '°' : ''}${calText(s)}.`;
     $('#twin').src = s.twin + (s.twin.includes('?') ? '&' : '?') + Date.now();
     $('#thumbs').innerHTML = '';
     $('#dets').innerHTML = '<tr><th>#</th><th>Object</th></tr>' + (s.props || []).map((n, i) => `<tr><td>${i + 1}</td><td>${esc(n)}</td></tr>`).join('');
@@ -581,7 +586,7 @@ connect();
       <thead><tr><th></th><th>Photos / video + VGGT</th><th>Scaniverse (phone app)</th><th>LiDAR (iPad mesh)</th></tr></thead>
       <tbody>
         <tr><td>Needs</td><td>Any phone camera</td><td>A phone with the app</td><td>A device with a LiDAR sensor</td></tr>
-        <tr><td>Scale</td><td>Estimated from the phone height; stage height within about 5 % of the Scaniverse scan</td><td>Metric</td><td>Metric (table top 0.75 m, ceiling 2.25 to 2.30 m)</td></tr>
+        <tr><td>Scale</td><td>True scale with a printed marker on the table; otherwise estimated from the phone height (stage height within about 5 % of the Scaniverse scan)</td><td>Metric</td><td>Metric (table top 0.75 m, ceiling 2.25 to 2.30 m)</td></tr>
         <tr><td>Names the objects</td><td>Yes: a detector, then a vision-model review</td><td>No</td><td>No</td></tr>
         <tr><td>Plan in our test</td><td>Cleanest: armchairs, sofa, lamps</td><td>Works, noisier</td><td>93 % of the floor, table legs visible</td></tr>
         <tr><td>Processing here</td><td>About 2 to 3 min on a laptop GPU</td><td>About 30 s</td><td>About 40 s</td></tr>

@@ -20,6 +20,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCALE_RE = re.compile(r"scale hint[^\n]*?--scale ([0-9.]+)")
+MARKER_RE = re.compile(r"^marker: ([^\n]*)$", re.M)
 
 
 @dataclass
@@ -85,6 +86,15 @@ def fill(argv: list[str], scale: float | None) -> list[str]:
 def find_scale(output: str) -> float | None:
     m = SCALE_RE.search(output)
     return float(m.group(1)) if m else None
+
+
+def find_marker(output: str) -> str | None:
+    """What the reconstruction said about the printed marker: "found", "disagree", "missing", or None (no word on it)."""
+    m = MARKER_RE.search(output)
+    if not m:
+        return None
+    line = m.group(1)
+    return "found" if "true scale" in line else "disagree" if "not used" in line else "missing"
 
 
 def settings(env=os.environ) -> dict:

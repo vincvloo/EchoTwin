@@ -68,6 +68,11 @@ def failure_reason(output: str) -> str:
     return (plain[-1] if plain else "no output")[:300]
 
 
+MARKER_SAY = {"found": "I found the marker, so the sizes are measured.",
+              "disagree": "I saw the marker, but the photos disagree about its size, so the sizes are estimated.",
+              "missing": "I did not see the marker, so the sizes are estimated and can be off by a factor of two."}
+
+
 async def import_photos_auto(frames: list[bytes], pitches: list, ctx: TwinContext, cfg: dict | None = None,
                              run=run_step) -> None:
     """The default photo importer: 3D when possible, quick otherwise."""
@@ -113,6 +118,8 @@ async def import_photos_auto(frames: list[bytes], pitches: list, ctx: TwinContex
             return await quick(f"The 3D model failed at '{step.name}'. Using quick mode.")
         if i == 0:
             scale = PL.find_scale(out)
+            if PL.find_marker(out):
+                ctx.say(MARKER_SAY[PL.find_marker(out)])
 
     progress(len(steps), 0)
     try:
