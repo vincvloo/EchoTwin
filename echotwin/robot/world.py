@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 import mujoco
 import numpy as np
 
-from .scene import HOME, TABLE_HALF, WS_HALF, Layout, build_xml
+from .scene import HOME, Layout, build_xml
 
 CTRL_HZ = 20
 CTRL_DT = 1.0 / CTRL_HZ
@@ -94,8 +94,9 @@ class World:
         v = np.clip(a[:3], -VMAX, VMAX)
         p0 = d.mocap_pos[self.hand_mocap].copy()
         zmin = (self.half(hs.attached) + 0.002) if hs.attached else 0.012
-        lo = np.array([-TABLE_HALF[0] + 0.03, -TABLE_HALF[1] + 0.03, zmin])
-        hi = np.array([TABLE_HALF[0] - 0.03, TABLE_HALF[1] - 0.03, Z_MAX])
+        th = self.layout.table_half
+        lo = np.array([-th[0] + 0.03, -th[1] + 0.03, zmin])
+        hi = np.array([th[0] - 0.03, th[1] - 0.03, Z_MAX])
         p1 = np.clip(p0 + v * CTRL_DT, lo, hi)
 
         want = a[3] > 0.5
@@ -141,4 +142,4 @@ class World:
             self.step((0, 0, 0, 1 if self.hand.grip else 0))
 
 
-__all__ = ["World", "HandState", "CTRL_DT", "CTRL_HZ", "VMAX", "HOME", "WS_HALF"]
+__all__ = ["World", "HandState", "CTRL_DT", "CTRL_HZ", "VMAX", "HOME"]

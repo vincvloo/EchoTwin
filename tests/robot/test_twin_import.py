@@ -15,7 +15,6 @@ from echotwin.robot.world import World
 
 def _everyday():
     lay = Layout()
-    lay.meta["sim_scale"] = 2.0
     lay.props = [
         {"name": "glass of water", "shape": "cylinder", "pos": (-0.1, 0.1), "size": (0.05, 0.05, 0.07), "rgb": (0.8, 0.8, 0.8)},
         {"name": "chocolate box", "shape": "flat", "pos": (0.15, -0.05), "yaw": 30, "size": (0.06, 0.035, 0.006), "rgb": (0.9, 0.9, 0.85)},
@@ -31,8 +30,8 @@ def test_save_and_load_round_trip():
     doc = TI.read_upload(data, "twin.zip", d / "in")
     assert doc["format"] == "phone-puppeteer-twin" and len(doc["objects"]) == 2
     choc = doc["objects"][1]
-    assert choc["name"] == "chocolate box" and abs(choc["size_cm"][0] - 6.0) < 0.01  # 0.12 sim m / 2 = 6 cm
-    assert abs(choc["pos_cm"][0] - 7.5) < 0.5 and abs(choc["yaw_deg"] - 30) < 2
+    assert choc["name"] == "chocolate box" and abs(choc["size_cm"][0] - 12.0) < 0.01  # 0.12 m = 12 cm: sim metres are real metres
+    assert abs(choc["pos_cm"][0] - 15.0) < 0.5 and abs(choc["yaw_deg"] - 30) < 2
     lay = TI.doc_to_layout(doc, d / "in")
     w2 = World(lay)
     assert np.allclose(w2.layout.props[1]["size"], (0.06, 0.035, 0.006), atol=1e-4)

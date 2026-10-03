@@ -26,7 +26,7 @@ async def import_photos(frames: list[bytes], pitches: list, ctx: TwinContext) ->
     lay = Layout()
     lay.props = [{"name": "chocolate box", "shape": "flat", "pos": (0.1, 0.0),       # sim metres
                   "size": (0.1, 0.06, 0.006), "rgb": (0.9, 0.9, 0.9)}]             # half sizes, sim metres
-    lay.meta["sim_scale"] = 2.0                  # sim metres per real metre
+    lay.table_half = (0.40, 0.30)                # the table, in metres (sim metres are real metres)
     sid, folder = ctx.new_dir()                  # files you write here are served at /scans/<sid>/
     ctx.apply(lay, {"id": sid, "mode": "everyday", "props": ["chocolate box"],
                     "greeting": "I've mapped your table. What should I move?"})

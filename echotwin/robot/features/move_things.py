@@ -7,7 +7,6 @@ import re
 
 import numpy as np
 
-from ..scene import TABLE_HALF
 from .tasks import _norm
 
 STOP = {"the", "a", "an", "of", "and", "with", "on", "in", "to", "it", "this", "that", "small", "big", "white"}
@@ -97,7 +96,7 @@ def goal_xy(world, plan: dict) -> np.ndarray:
         target = p + np.array(d, float) * dist
     else:
         target = np.zeros(2)
-    lim = np.array([TABLE_HALF[0] - 0.06, TABLE_HALF[1] - 0.06])
+    lim = np.array([world.layout.table_half[0] - 0.06, world.layout.table_half[1] - 0.06])
     target = np.clip(target, -lim, lim)
     # nudge away from anything else it would land on
     for n in world.things():

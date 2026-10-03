@@ -7,7 +7,6 @@ import numpy as np
 
 from echotwin.robot import twin_import as TI
 from echotwin.robot.features import move_things as MT
-from echotwin.robot.scene import TABLE_HALF
 from echotwin.robot.world import World
 from echotwin.scene import schema, to_twin
 
@@ -21,8 +20,9 @@ def _layout():
     return TI.doc_to_layout(json.loads(json.dumps(DOC)), Path(tempfile.mkdtemp()))
 
 
-def test_table_size_matches_the_twin_builder():
-    assert tuple(round(2 * h, 3) for h in TABLE_HALF) == to_twin.TABLE_SIM
+def test_table_aspect_matches_the_twin_builder():
+    from echotwin.robot.scene import TABLE_ASPECT
+    assert abs(TABLE_ASPECT - to_twin.TABLE_ASPECT) < 1e-9
 
 
 def test_obstacle_is_solid_and_survives_a_file_round_trip():
@@ -33,7 +33,7 @@ def test_obstacle_is_solid_and_survives_a_file_round_trip():
     assert "obstacle_0" in [w.model.geom(i).name for i in range(w.model.ngeom)]
     doc = TI.layout_to_doc(lay, w, Path(tempfile.mkdtemp()))
     assert doc["obstacles"][0]["size_cm"] == [20.0, 10.0, 30.0] and doc["obstacles"][0]["pos_cm"] == [20.0, 0.0]
-    assert w.tallest() >= 0.3 * 2 * 0.99          # the sofa (30 cm real, scaled) counts as the tallest thing
+    assert w.tallest() >= 0.3 * 0.99              # the sofa (30 cm) counts as the tallest thing
 
 
 def test_old_files_without_obstacles_still_load():
@@ -60,4 +60,4 @@ def test_lounge_scene_loads_into_the_simulator():
     assert len(w.things()) == 2 and w.layout.obstacles
     for n in w.things():
         p = w.obj_pos(n)
-        assert abs(p[0]) < TABLE_HALF[0] and abs(p[1]) < TABLE_HALF[1] and p[2] > 0     # on the table
+        assert abs(p[0]) < w.layout.table_half[0] and abs(p[1]) < w.layout.table_half[1] and p[2] > 0     # on the table

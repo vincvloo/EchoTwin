@@ -17,9 +17,8 @@ from .dataset import Dataset, score_episode, state_vector
 from .features import prop_skills as PS
 from .features import tasks as T
 from .router import Intent
-from .scene import HOME, TABLE_HALF, Layout
+from .scene import HOME, Layout
 
-TABLE_HALF_X = TABLE_HALF[0]
 from .voice import Voice
 from .world import CTRL_DT, VMAX, World
 
@@ -109,7 +108,8 @@ class Sim:
         self.world.build(layout)
         if layout.props:  # keep the robot out of the picture
             w = self.world
-            w.data.mocap_pos[w.hand_mocap] = [TABLE_HALF_X - 0.08, -0.34, 0.28]
+            th = w.layout.table_half
+            w.data.mocap_pos[w.hand_mocap] = [th[0] - 0.08, -th[1] - 0.04, 0.28]
         self.world.settle(5)
         if self._renderer is not None:
             self._renderer.close()

@@ -1,13 +1,12 @@
 """MuJoCo scene generation: table, everyday objects (props), static scenery, floating gripper.
 
 Coordinates: the table centre is the origin, x to the right, y away from the user ("back"), z up.
-The sim is SCALE x real size so small objects become comfortably graspable.
+Sim metres are real metres. The table size is part of the layout (`Layout.table_half`).
 """
 from dataclasses import dataclass, field
 
-SCALE = 2.0
-WS_HALF = (297.0 / 2000 * SCALE, 210.0 / 2000 * SCALE)             # 0.297 x 0.21 m work area
-TABLE_HALF = (2 * WS_HALF[0], 2 * WS_HALF[1])                      # the table texture covers this
+DEFAULT_TABLE_HALF = (0.40, 0.30)       # half size of the table (x, y) in metres, when nothing says otherwise
+TABLE_ASPECT = 1188 / 840               # width / height of the table texture the quick importer builds
 HOME = (0.0, -0.16, 0.20)
 
 
@@ -19,13 +18,15 @@ class Layout:
     view: dict | None = None  # camera where the phone was: {pos, xyaxes, fovy}
     # 3D scans: scenery meshes (visual only): {file, texture?, pos(3), euler(3, deg), scale}
     scene: list = field(default_factory=list)
-    meta: dict = field(default_factory=dict)  # e.g. {"sim_scale": sim metres per real metre, "name": ...}
+    meta: dict = field(default_factory=dict)  # e.g. {"name": ...}
     # fixed furniture next to the table: {name, shape, pos, size (half xyz), rgb, yaw}; solid, never moved
     obstacles: list = field(default_factory=list)
+    table_half: tuple = DEFAULT_TABLE_HALF   # real metres
 
     def copy(self) -> "Layout":
         return Layout(self.texture, [dict(p) for p in self.props], self.view,
-                      [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles])
+                      [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles],
+                      tuple(self.table_half))
 
 
 def _f(*v) -> str:
@@ -33,7 +34,7 @@ def _f(*v) -> str:
 
 
 def build_xml(layout: Layout) -> str:
-    tw, th = TABLE_HALF
+    tw, th = layout.table_half
     if layout.texture:
         tex = layout.texture.replace("\\", "/")
         table_asset = (f'<texture name="tabletex" type="2d" file="{tex}"/>'
