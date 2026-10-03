@@ -1,64 +1,42 @@
-# Scanning a room with the OnePlus 12
+# Taking the photos
 
-Goal: a metric 3D scan whose **lowest 40 cm** (where the robot's sonars look) is complete.
+EchoTwin builds a 3D model of a table from ordinary phone photos or a short video. No special app and no LiDAR.
 
-## Before you start
+## What to capture
 
-1. Install **Google Play Services for AR** from the Play Store.
-2. Install one scanning app: Polycam, Scaniverse or KIRI Engine. Check that it can export
-   `.ply`, `.glb` or `.obj` on your plan.
-3. Pick the room: some furniture at floor level, lights on, little glass.
-4. Tape-measure two reference distances (one wall length, one table edge). Write them down.
+- **One table, one scene.** Do not mix photos of different places.
+- **10 to 20 overlapping photos**, or the phone's **Sweep scan** (6 seconds, a few photos a second; 12 are used).
+  Move slowly in an arc around the table and keep the whole table top in view.
+- **Hold the phone about 45 cm above the table, looking down**. The size of everything is worked out from this height
+  (`SCAN_CAM_HEIGHT`, default 0.45 m). If you hold it much higher or lower, set the real height.
+- **Plain table, good light**, no strong reflections. Glass and shiny things are hard.
+- **Hands out of the picture.** A hand in several photos can become an obstacle in the twin.
+- **Put 3 to 6 objects on the table**, with some space between them. Objects under about 5 cm are often lost.
 
-## Scaniverse (what we use)
+## How to give the photos to EchoTwin
 
-- Tested 2026-09-29 on the OnePlus 12 (DARE Campus lounge stage). The mesh build failed in the app,
-  but the **splat** export worked: a `.ply` of 1.26M Gaussian splats, metric, Y up.
-- `mesh_to_grid` reads splat `.ply` files directly (keeps opaque splats under 5 cm). Export as
-  **PLY**, not SPZ (compressed splat, not supported).
-- Splats also capture the space around the target (hall, view through windows). Add `--crop 4`
-  (metres around the densest area).
-- If the robot drives on a raised surface (stage, platform), add `--floor-offset <height>`.
+- On the phone: open `https://<laptop-ip>:8443/phone`, **Scan**, **Sweep scan**.
+- On the laptop: the dashboard, **Upload & check photos** (or a video), or the example photos.
 
-## Fallback: photos or a video with VGGT
+A 3D model takes about 2 to 3 minutes on a laptop GPU; the dashboard shows progress and a **Skip, use quick mode**
+button. Quick mode (one photo, no GPU) is the fallback in every case below.
 
-No usable scan? 10-30 overlapping photos or a 30-60 s video work too, but have no metric scale:
-`..\vggt-env\Scripts\python.exe scripts/video_to_ply.py <folder or .mp4> -o data/x.ply`, then
-convert with `--up y --scale <printed hint>` and fix the scale with `--ref` and a tape measurement.
-Keep the floor in view; one scene per run (do not mix photos of different places).
+## When the 3D model is not used
 
-## Scanning
-
-- Use the app's room or photo scanning mode (the OnePlus 12 has no LiDAR).
-- **Hold the phone low, 30-60 cm above the floor**, pointing slightly down. Phones scan the floor
-  line badly, and that is exactly the band the robot uses.
-- Walk slowly along the walls. Keep plain walls at an angle so the camera sees texture next to them.
-- Cover furniture legs and the bottom of cabinets and sofas.
-- Finish where you started so the tracking can close the loop.
-- One room per scan to start with (about 5-10 minutes).
-
-## Export and convert
-
-1. Export as `.ply` (point cloud) or `.glb` / `.obj` (mesh). Keep metric scale, no re-centering.
-2. Copy it into `data/` on the laptop, then:
-   ```bash
-   python -m sonarloc.mesh_to_grid data/my_room.glb -o out/my_room --res 0.03 --band 0.05 0.35
-   ```
-   The up axis is detected automatically (printed as `up axis: ...`). Force it with `--up y` or `--up z`
-   if the detection is wrong.
-3. Read the quality lines: floor coverage should be above ~80 %, wall gaps should only be doorways.
-   Open `out/my_room.png`. Walls and furniture legs should be black, the floor white.
-4. Check scale: `python scripts/measure.py data/my_room.glb` prints wall-face positions along the map
-   axes; compare the matching difference with the tape measure (or count cells x 3 cm on the PNG).
-   Within 3 cm is good.
-
-## Common problems
-
-| Symptom | Cause | Fix |
+| The robot says | Why | What to do |
 |---|---|---|
-| Floor comes out black | Floor points inside the band (tilted or thick floor) | Raise `--band` lower bound to 0.08 |
-| Walls have gaps | Plain walls, poor texture | Rescan closer and at an angle; or lower `--res` to 0.05 |
-| Map rotated 90 degrees | `align_walls` puts the longer side along x | Expected, harmless |
-| Whole map black or empty | Wrong up axis (check the printed `up axis`) | Try `--up y` or `--up z` |
-| Map is huge, room is a small patch | Scan caught the surroundings (splats do) | `--crop 4` |
-| Platform or stage is one black block | Floor detected below the platform | `--floor-offset <platform height>` |
+| (quick mode, nothing said) | `PERCEPTION_PY` not set, fewer than 3 photos, or `SCAN_MODE=quick` | Set `PERCEPTION_PY` in `.env` (see the README) |
+| I found N things, but nothing small enough to move | The scene is a room, or the objects are too big or too far | Photograph the table from closer |
+| The 3D model found no objects | Objects too small or too few photos | Closer, more photos, more light |
+| The 3D model failed at '...' | A step crashed (the server log has the line) | Often the GPU is short of memory: close other programs |
+
+## Known limits
+
+- The size of the scene comes from the phone height, so absolute sizes can be off by a factor; the twin is scaled to the
+  simulated table anyway.
+- The reconstructed table is flat to only 2 to 3 cm.
+- Objects are named by a detector that sometimes says look-alike names ("mouse" for an earbud case); the review step with
+  an `AI_API_KEY` improves this.
+- A fiducial marker on the table for a true scale is planned (see `TASKS.md`).
+
+For other ways to capture a place (Scaniverse, LiDAR) and how they compare, see `APPROACHES.md`.
