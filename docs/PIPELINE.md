@@ -7,7 +7,7 @@ One run goes through eight steps. Each step hands one file to the next.
 | 1 | Capture: phone photos or a video (see `CAPTURE_GUIDE.md`) | phone | `examples/*/` |
 | 2 | Reconstruct: VGGT, camera and depth heads | `perception/reconstruct.py` | cloud `.ply`, `.cams.npz`, `.pix.npz` |
 | 3 | Level and scale: floor RANSAC, wall alignment, scale from phone height or `--ref` | `perception/mapping.py` | metric, levelled points |
-| 4 | Detect: YOLO11-seg per photo, labels onto points, multi-view voting | `perception/detect.py`, `objects.py` | `<stem>_objects.json`, map |
+| 4 | Detect: YOLOE with a text prompt list (public Objects365 names; or YOLO11 if you do not have the weights) per photo, labels onto points, multi-view voting | `perception/detect.py`, `objects.py` | `<stem>_objects.json`, map |
 | 5 | Review: a vision model (NVIDIA) looks at each object in 2 or more photos; a name, shape or removal needs two photos to agree. Without a key: skipped | `perception/review.py`, `scene/review.py` | updated `<stem>_scene.json`, marked photos in `<stem>_scene_review/` |
 | 6 | Scene file: class catalog (shape, movable, surface), support, one file both halves read | `scene/catalog.py`, `scene/schema.py` | `<stem>_scene.json` ([format](../echotwin/scene/schema.md)) |
 | 7a | Room: occupancy map, sonar particle filter | `navigation/` | GIF, error plots |

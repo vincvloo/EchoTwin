@@ -139,3 +139,14 @@ def test_run_step_stops_a_slow_command_when_skipped(tmp_path):
         return await P.run_step([sys.executable, "-c", "import time; time.sleep(60)"], tmp_path, skip, lambda s: None)
     t0 = asyncio.run(go())
     assert t0[0] == "skipped"
+
+
+def test_failure_reason_shows_the_error_not_the_warnings():
+    out = ("reconstruct.py:62: UserWarning: The given NumPy array is not writable\n"
+           "  out = [F.interpolate(x)]\n"
+           "Traceback (most recent call last):\n"
+           "  File \"x.py\", line 1, in <module>\n"
+           "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 20.00 MiB\n")
+    assert P.failure_reason(out) == "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 20.00 MiB"
+    assert P.failure_reason("UserWarning: x\nloading model\n") == "loading model"
+    assert P.failure_reason("") == "no output"

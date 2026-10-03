@@ -319,3 +319,23 @@ def test_find_objects_merges_fragment_into_larger_object():
     assert got == [("chair", 0), ("couch", 1)]
     couch_obj = [o for o in objs if o["class"] == "couch"][0]
     assert abs(couch_obj["size_x"] - 1.5) < 0.11
+
+
+def test_find_objects_keeps_things_on_a_table_apart_from_the_table():
+    """A cup and a book standing on a desk are objects of their own, not fragments of the desk."""
+    from echotwin.perception.objects import find_objects
+    rng = np.random.default_rng(16)
+    g = box_room(3.0, 3.0, 0.02)
+    n = 60000                                                 # dense enough that every desk cell has points
+    desk = np.column_stack([rng.uniform(0.8, 2.0, n), rng.uniform(0.8, 1.6, n), rng.uniform(0.05, 0.12, n)])
+    under_cup = (desk[:, 0] > 0.98) & (desk[:, 0] < 1.14) & (desk[:, 1] > 0.98) & (desk[:, 1] < 1.14)
+    under_book = (desk[:, 0] > 1.48) & (desk[:, 0] < 1.77) & (desk[:, 1] > 1.18) & (desk[:, 1] < 1.42)
+    desk = desk[~(under_cup | under_book)]                    # the desk is hidden under the things on it
+    n = len(desk)
+    cup = np.column_stack([rng.uniform(1.0, 1.12, 800), rng.uniform(1.0, 1.12, 800), rng.uniform(0.12, 0.22, 800)])
+    book = np.column_stack([rng.uniform(1.5, 1.75, 800), rng.uniform(1.2, 1.4, 800), rng.uniform(0.12, 0.15, 800)])
+    pts = np.vstack([desk, cup, book])
+    cls = np.r_[np.full(n, 60), np.full(800, 41), np.full(800, 73)].astype(np.int16)
+    objs, _ = find_objects(pts, cls, rng.integers(0, 3, len(pts)), g,
+                           {60: "desk", 41: "cup", 73: "book"}, min_area=0.001)
+    assert sorted((o["class"], o["merged"]) for o in objs) == [("book", 0), ("cup", 0), ("desk", 0)]

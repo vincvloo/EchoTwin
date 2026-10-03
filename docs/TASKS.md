@@ -11,5 +11,7 @@
 - [x] PR3 NVIDIA review of YOLO detections
 - [x] PR4 Phone scan runs the 3D pipeline, with a "skip, quick mode" button
 - [x] PR5 Teaching guide (how to film and how it is processed) and the capture-comparison info button
-- [ ] PR6 Detector benchmark: YOLO11 vs open-vocabulary and newer models
+- [x] PR6 Detector benchmark: YOLO11 vs open-vocabulary and newer models (text-prompt YOLOE with a public vocabulary is now the preferred detector)
+      Result: open vocabulary with text prompts removes the 80-class limit (`docs/RESULTS.md`). Still open: a non-YOLO
+      model (OWLv2, Grounding DINO: permissive licences, would also remove the AGPL dependency) and small tabletop objects.
 - [ ] Sonar extras (browser simulator, goal navigation, harsher sensor model, ROS 2): see `TASKS_SONAR.md`

@@ -20,9 +20,13 @@ import numpy as np
 from scipy import ndimage
 
 
+from echotwin.scene import catalog
 from echotwin.scene import schema as scene_schema
 from echotwin.perception.mapping import (UP, add_scale_args, align_walls, level_floor, load_points,
                                    points_to_grid, resolve_scale)
+
+
+TABLES = {"dining table"}      # catalog.normalize maps table, desk, coffee table... to this
 
 
 def find_objects(pts, cls, frame, gmap, names, min_pts=5, min_views=2, min_area=0.02, max_z=1.5, pixels=None):
@@ -57,7 +61,8 @@ def find_objects(pts, cls, frame, gmap, names, min_pts=5, min_views=2, min_area=
         mask = ndimage.binary_closing(good & (best == j), iterations=1)
         lab, n = ndimage.label(mask)
         parts += [(lab == i, [kk]) for i in range(1, n + 1) if (lab == i).sum() * gmap.res ** 2 >= min_area]
-    parts = merge_parts(parts)
+    tables = {int(k) for k in classes if catalog.normalize(names[int(k)]) in TABLES}
+    parts = merge_parts(parts, keep_apart=tables)
     objects, label_img = [], np.full(gmap.occ.shape, -1, int)
     for cells, kks in parts:
         rr, cc = np.nonzero(cells)
@@ -103,13 +108,14 @@ def _bbox(cells):
     return rr.min(), rr.max() + 1, cc.min(), cc.max() + 1
 
 
-def merge_parts(parts, overlap=0.5, max_ratio=0.4, reach=3):
+def merge_parts(parts, overlap=0.5, max_ratio=0.4, reach=3, keep_apart=()):
     """Merge fragments into the object they belong to (a couch cushion labelled 'chair').
 
     A blob is a fragment of a larger blob when it has at most `max_ratio` of its area, >= `overlap`
     of its bounding box lies inside the larger one's box, and it touches it (cells within `reach`
     cells). With several candidates it joins the one it touches most. The larger blob keeps its
-    class. Two real neighbours of similar size stay apart.
+    class. Two real neighbours of similar size stay apart. Blobs whose class id is in `keep_apart` (tables:
+    things standing on a table are not part of it) never absorb anything.
     """
     parts = sorted(parts, key=lambda p: -p[0].sum())
     i = len(parts) - 1
@@ -119,7 +125,7 @@ def merge_parts(parts, overlap=0.5, max_ratio=0.4, reach=3):
         best, best_touch = None, 0.0
         for j in range(i):
             big = parts[j][0]
-            if cells.sum() > max_ratio * big.sum():
+            if cells.sum() > max_ratio * big.sum() or any(k in keep_apart for k in parts[j][1]):
                 continue
             a0, a1, b0, b1 = _bbox(big)
             inter = max(0, min(a1, c1) - max(a0, c0)) * max(0, min(b1, d1) - max(b0, d0))

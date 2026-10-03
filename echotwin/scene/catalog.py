@@ -48,6 +48,7 @@ _ENTRIES: dict[str, tuple[str, bool, bool]] = {
     "toothbrush": ("flat", _T, _F),
 }
 COCO_CLASSES = tuple(_ENTRIES)
+TRANSIENT = ("person", "hand")      # they move away: never part of the scene (a hand in a photo is not an obstacle)
 
 _ALIASES = {
     "phone": "cell phone", "mobile phone": "cell phone", "smartphone": "cell phone", "mug": "cup",
@@ -98,6 +99,20 @@ def _guess_shape(name: str, sx: float, sy: float, h: float) -> str:
     if min(sx, sy) > 0 and max(sx, sy) / min(sx, sy) < 1.3 and h > 1.5 * max(sx, sy):
         return "cylinder"          # tall and narrow
     return "box"
+
+
+# Names to ask an open-vocabulary detector (YOLOE with text prompts) for. A generic indoor vocabulary: rooms,
+# furniture, kitchen, desk and tabletop things. It is not tuned to any scene; extend it for yours.
+PROMPTS = (
+    "sofa", "couch", "armchair", "chair", "stool", "table", "coffee table", "desk", "shelf", "cabinet",
+    "bed", "potted plant", "vase", "planter", "lamp", "rug", "carpet", "curtain", "pillow", "cushion",
+    "blanket", "painting", "picture frame", "mirror", "clock", "book", "bottle", "water bottle", "cup",
+    "mug", "glass", "wine glass", "bowl", "plate", "fork", "knife", "spoon", "laptop", "keyboard",
+    "computer mouse", "monitor", "tv", "speaker", "projector screen", "remote control", "cell phone",
+    "tablet", "charger", "power adapter", "cable", "headphones", "earbud case", "chocolate bar",
+    "candy", "box", "bag", "backpack", "umbrella", "toy", "ball", "banner", "sign", "poster", "person",
+    "hand"
+)
 
 
 # one stable colour per class for the twin (the real colour is not in the scene file)

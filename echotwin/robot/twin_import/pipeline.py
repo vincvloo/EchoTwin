@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,6 +58,16 @@ async def run_step(argv: list[str], cwd: Path, skip: asyncio.Event | None, tick,
             skipper.cancel()
 
 
+def failure_reason(output: str) -> str:
+    """The line that says what went wrong: the last error line, else the last line that is not a warning."""
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    for ln in reversed(lines):
+        if re.search(r"(Error|Exception)", ln) and "warn" not in ln.lower():
+            return ln[:300]
+    plain = [ln for ln in lines if "warn" not in ln.lower() and not ln.startswith("out = ")]
+    return (plain[-1] if plain else "no output")[:300]
+
+
 async def import_photos_auto(frames: list[bytes], pitches: list, ctx: TwinContext, cfg: dict | None = None,
                              run=run_step) -> None:
     """The default photo importer: 3D when possible, quick otherwise."""
@@ -96,8 +107,7 @@ async def import_photos_auto(frames: list[bytes], pitches: list, ctx: TwinContex
         if state == "skipped":
             return await quick("Okay, quick mode.")
         if state == "failed":
-            tail = [ln for ln in out.splitlines() if ln.strip()][-3:]
-            print(f"[pipeline] {step.name} failed:", " | ".join(tail), file=sys.stderr)
+            print(f"[pipeline] {step.name} failed: {failure_reason(out)}", file=sys.stderr)
             if step.optional:
                 continue
             return await quick(f"The 3D model failed at '{step.name}'. Using quick mode.")
