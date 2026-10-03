@@ -1,0 +1,388 @@
+"""The robot arm of the simulation, described by a small JSON so it can be swapped for the arm you have.
+
+An *arm descriptor* (`echotwin/robot/arms/<name>.json`) says where the arm's MJCF file is, which of its joints are the
+arm and which actuators drive the gripper, where the tool point is (between the pads) and which of its axes point
+down and close. `compose` attaches the arm to the scene with MuJoCo's `MjSpec`; `ArmIK` turns "put the tool here,
+pointing down, jaws across this direction" into joint targets.
+
+    ARM=builtin              a small parallel-jaw arm written in this file (default; works offline)
+    ARM=so_arm100            the SO-ARM100 from MuJoCo Menagerie (python -m echotwin.robot.arm --download so_arm100)
+    ARM=path/to/arm.json     your own (see docs/ARMS.md)
+
+    python -m echotwin.robot.arm --list | --download so_arm100 | --check [name]
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import urllib.request
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+import mujoco
+
+REPO = Path(__file__).resolve().parents[2]
+ARMS_DIR = Path(__file__).with_name("arms")
+PREFIX = "arm_"
+BUILTIN_MJCF = """
+<mujoco model="builtin_arm">
+  <compiler angle="radian"/>
+  <default>
+    <joint damping="0.3" armature="0.01"/>
+    <geom contype="1" conaffinity="1" friction="1 0.01 0.001" rgba="0.82 0.84 0.88 1"/>
+    <position kp="60" kv="3" forcerange="-4 4"/>
+  </default>
+  <worldbody>
+    <body name="base" pos="0 0 0">
+      <geom type="cylinder" size="0.045 0.015" pos="0 0 0.015" rgba="0.25 0.27 0.3 1"/>
+      <body name="turret" pos="0 0 0.03">
+        <joint name="pan" axis="0 0 1" range="-1.9 1.9"/>
+        <geom type="cylinder" size="0.03 0.035" pos="0 0 0.035" rgba="0.3 0.32 0.36 1"/>
+        <body name="upper" pos="0 0 0.07">
+          <joint name="lift" axis="-1 0 0" range="-0.35 1.75"/>
+          <geom type="capsule" fromto="0 0 0 0 0 0.16" size="0.016"/>
+          <body name="fore" pos="0 0 0.16">
+            <joint name="elbow" axis="-1 0 0" range="-0.1 2.9"/>
+            <geom type="capsule" fromto="0 0 0 0 0 0.18" size="0.013"/>
+            <body name="wrist" pos="0 0 0.18">
+              <joint name="wflex" axis="-1 0 0" range="-2.6 2.6"/>
+              <geom type="box" size="0.02 0.016 0.014" pos="0 0 0.012" rgba="0.3 0.32 0.36 1"/>
+              <body name="hand" pos="0 0 0.03">
+                <joint name="roll" axis="0 0 1" range="-3.0 3.0"/>
+                <geom type="box" size="0.03 0.016 0.012" pos="0 0 0.012" rgba="0.3 0.32 0.36 1"/>
+                <body name="fl" pos="-0.045 0 0.03">
+                  <joint name="fl" type="slide" axis="1 0 0" range="0 0.047"/>
+                  <geom name="pad_l" type="box" size="0.004 0.012 0.025" pos="0 0 0.025" friction="1.6 0.02 0.002" condim="4" rgba="0.15 0.15 0.15 1"/>
+                </body>
+                <body name="fr" pos="0.045 0 0.03">
+                  <joint name="fr" type="slide" axis="-1 0 0" range="0 0.047"/>
+                  <geom name="pad_r" type="box" size="0.004 0.012 0.025" pos="0 0 0.025" friction="1.6 0.02 0.002" condim="4" rgba="0.15 0.15 0.15 1"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <position name="pan" joint="pan"/>
+    <position name="lift" joint="lift"/>
+    <position name="elbow" joint="elbow"/>
+    <position name="wflex" joint="wflex"/>
+    <position name="roll" joint="roll"/>
+    <position name="fl" joint="fl" kp="400" kv="12" forcerange="-14 14" ctrlrange="0 0.06"/>
+    <position name="fr" joint="fr" kp="400" kv="12" forcerange="-14 14" ctrlrange="0 0.06"/>
+  </actuator>
+</mujoco>
+"""
+
+
+class ArmError(ValueError):
+    pass
+
+
+@dataclass
+class ArmSpec:
+    name: str
+    mjcf: str                       # a path (relative to the repo) or "builtin"
+    base_body: str
+    joints: list[str]               # the arm joints, base to wrist
+    actuators: list[str]            # their position actuators, same order
+    gripper: dict                   # {"mode": "parallel"|"single", "actuators": [...], "open": [...], "closed": [...], "fixed_side": 1}
+    tool: dict                      # {"body", "pos", "point_axis", "close_axis"}
+    pads: list[str]                 # substrings of the pad geom names
+    home: list[float]               # joint values to start from
+    prefix: str = PREFIX
+    mount_yaw_deg: float = 0.0
+    max_opening: float | None = None
+    download: dict | None = None
+    source: Path | None = None
+
+    @property
+    def mjcf_path(self) -> Path | None:
+        if self.mjcf == "builtin":
+            return None
+        p = Path(self.mjcf)
+        return p if p.is_absolute() else REPO / p
+
+    def missing_files(self) -> list[Path]:
+        if self.mjcf == "builtin":
+            return []
+        base = self.mjcf_path.parent
+        need = [self.mjcf_path] + [base / f for f in (self.download or {}).get("files", [])]
+        return [p for p in need if not p.exists()]
+
+
+# ---------------- loading ----------------
+def list_arms() -> list[str]:
+    return sorted(p.stem for p in ARMS_DIR.glob("*.json"))
+
+
+def load(name: str | None = None) -> ArmSpec:
+    """An arm by name (echotwin/robot/arms/<name>.json), by path, or 'auto' (the ARM variable, else builtin)."""
+    name = (name or os.environ.get("ARM") or "auto").strip()
+    if name == "auto":
+        name = "builtin"
+    path = Path(name)
+    if not path.suffix:
+        path = ARMS_DIR / f"{name}.json"
+    elif not path.is_absolute():
+        path = REPO / path
+    if not path.exists():
+        raise ArmError(f"No arm descriptor {name!r}. Known arms: {', '.join(list_arms())}, or a path to a .json file.")
+    return parse(json.loads(path.read_text(encoding="utf-8")), path)
+
+
+def parse(d: dict, source: Path | None = None) -> ArmSpec:
+    for key in ("name", "mjcf", "base_body", "joints", "actuators", "gripper", "tool", "pads", "home"):
+        if key not in d:
+            raise ArmError(f"The arm descriptor has no '{key}'.")
+    if len(d["joints"]) != 5 or len(d["actuators"]) != 5:
+        raise ArmError("The arm needs 5 joints and 5 actuators (base rotation, three bending joints, wrist roll).")
+    g = d["gripper"]
+    n = len(g.get("actuators", []))
+    if g.get("mode") not in ("parallel", "single") or not n or len(g.get("open", [])) != n or len(g.get("closed", [])) != n:
+        raise ArmError("gripper: 'mode' (parallel or single) and matching 'actuators', 'open' and 'closed' lists are needed.")
+    for key in ("body", "pos", "point_axis", "close_axis"):
+        if key not in d["tool"]:
+            raise ArmError(f"tool: '{key}' is missing.")
+    if len(d["home"]) != 5:
+        raise ArmError("home: five joint values are needed.")
+    return ArmSpec(name=d["name"], mjcf=d["mjcf"], base_body=d["base_body"], joints=list(d["joints"]),
+                   actuators=list(d["actuators"]), gripper=dict(g), tool=dict(d["tool"]), pads=list(d["pads"]),
+                   home=[float(v) for v in d["home"]], prefix=d.get("prefix", PREFIX),
+                   mount_yaw_deg=float(d.get("mount_yaw_deg", 0.0)), max_opening=d.get("max_opening"),
+                   download=d.get("download"), source=source)
+
+
+# ---------------- putting the arm into a scene ----------------
+def child_spec(arm: ArmSpec) -> "mujoco.MjSpec":
+    if arm.mjcf == "builtin":
+        return mujoco.MjSpec.from_string(BUILTIN_MJCF)
+    missing = arm.missing_files()
+    if missing:
+        raise ArmError(f"The arm '{arm.name}' is missing {len(missing)} file(s), e.g. {missing[0]}. "
+                       f"Fetch it with: python -m echotwin.robot.arm --download {arm.name}")
+    return mujoco.MjSpec.from_file(str(arm.mjcf_path))
+
+
+def compose(scene: "mujoco.MjSpec", arm: ArmSpec, base_xy=(0.0, 0.0)) -> None:
+    """Attach the arm to `scene` with its base at base_xy on the table (z = 0) and add the `tool` site."""
+    kid = child_spec(arm)
+    for name in (arm.base_body, arm.tool["body"], *arm.joints):
+        if kid.body(name) is None and kid.joint(name) is None:
+            raise ArmError(f"The arm file has no body or joint called '{name}'.")
+    frame = scene.worldbody.add_frame(pos=[base_xy[0], base_xy[1], 0.0], euler=[0, 0, arm.mount_yaw_deg])
+    scene.attach(kid, frame=frame, prefix=arm.prefix)
+    scene.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
+    scene.option.impratio = 10
+    for b in scene.bodies:                      # the servos hold the weight of the arm, as on the real thing
+        if b.name.startswith(arm.prefix):
+            b.gravcomp = 1.0
+    scene.body(arm.prefix + arm.tool["body"]).add_site(
+        name="tool", pos=list(arm.tool["pos"]), size=[0.004, 0, 0], rgba=[1, 0.2, 0.2, 1])
+
+
+def _unit(v) -> np.ndarray:
+    v = np.asarray(v, float)
+    return v / np.linalg.norm(v)
+
+
+class ArmIK:
+    """Damped least squares on a scratch copy of the data.
+
+    Pose asked for: the tool point at `target`, the tool's `point_axis` straight down, its `close_axis`
+    horizontal along `yaw`. 5 joints, 6 constraints: position wins, orientation is the compromise.
+    """
+
+    def __init__(self, model: "mujoco.MjModel", arm: ArmSpec, base_xy=(0.0, 0.0)):
+        self.m, self.arm = model, arm
+        self.base = np.array([base_xy[0], base_xy[1], 0.0])         # targets are in table coordinates
+        self.scratch = mujoco.MjData(model)
+        self.jid = [self._joint(n) for n in arm.joints]
+        self.qadr = [model.jnt_qposadr[j] for j in self.jid]
+        self.dadr = [model.jnt_dofadr[j] for j in self.jid]
+        self.lo = model.jnt_range[self.jid, 0].copy()
+        self.hi = model.jnt_range[self.jid, 1].copy()
+        self.site = model.site("tool").id
+        self.p_axis = _unit(arm.tool["point_axis"])
+        self.c_axis = _unit(arm.tool["close_axis"])
+        self.q_home = np.array(arm.home, float)
+        self.q_down = self.q_home.copy()
+
+    def _joint(self, name: str) -> int:
+        j = mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_JOINT, self.arm.prefix + name)
+        if j < 0:
+            raise ArmError(f"The arm has no joint '{name}'.")
+        return j
+
+    def seed_down(self, near_rel_xy, z=0.10):
+        """A good starting pose: tool pointing down about `near_rel_xy` from the base (many iterations)."""
+        q, ep, er = self._solve(self.base + np.array([near_rel_xy[0], near_rel_xy[1], z]), 0.0, self.q_home.copy(), 600)
+        self.q_down = q
+        return ep, er
+
+    def pose(self, q) -> tuple[np.ndarray, np.ndarray]:
+        s = self.scratch
+        for a, v in zip(self.qadr, q):
+            s.qpos[a] = v
+        mujoco.mj_kinematics(self.m, s)
+        return s.site_xpos[self.site].copy(), s.site_xmat[self.site].reshape(3, 3).copy()
+
+    def _solve(self, target, yaw, q0, iters):
+        s = self.scratch
+        q = np.clip(np.asarray(q0, float), self.lo, self.hi)
+        down = np.array([0.0, 0.0, -1.0])
+        close = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+        jp = np.zeros((3, self.m.nv))
+        jr = np.zeros((3, self.m.nv))
+        e_pos = np.ones(3)
+        e_rot = np.ones(3)
+        for _ in range(iters):
+            for a, v in zip(self.qadr, q):
+                s.qpos[a] = v
+            mujoco.mj_kinematics(self.m, s)
+            mujoco.mj_comPos(self.m, s)
+            R = s.site_xmat[self.site].reshape(3, 3)
+            e_pos = target - s.site_xpos[self.site]
+            e_rot = 0.5 * (np.cross(R @ self.p_axis, down) + np.cross(R @ self.c_axis, close))
+            if np.linalg.norm(e_pos) < 4e-4 and np.linalg.norm(e_rot) < 4e-3:
+                break
+            mujoco.mj_jacSite(self.m, s, jp, jr, self.site)
+            J = np.vstack([jp[:, self.dadr], 0.3 * jr[:, self.dadr]])
+            err = np.concatenate([e_pos, 0.3 * e_rot])
+            dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), err)
+            q = np.clip(q + 0.8 * dq, self.lo, self.hi)
+        return q, float(np.linalg.norm(e_pos)), float(np.linalg.norm(e_rot))
+
+    def solve(self, target, yaw, q0, iters=60):
+        """-> (joint values, position error in m, orientation error). Warm start first, then restarts."""
+        q, ep, er = self._solve(target, yaw, q0, 6)
+        if ep < 2e-3 and er < 2e-2:
+            return q, ep, er
+        best = (ep + 0.05 * er, q, ep, er)
+        for seed in (q0, self.q_down):
+            q, ep, er = self._solve(target, yaw, seed, iters)
+            if ep + 0.05 * er < best[0]:
+                best = (ep + 0.05 * er, q, ep, er)
+            if ep < 1e-3 and er < 1e-2:
+                break
+        return best[1], best[2], best[3]
+
+
+class Workspace:
+    """Where the tool can go, pointing down, relative to the base (forward = +y).
+
+    Built once per arm by asking the IK, then cached: feasible[radius, height]. `clamp` pulls a wanted tool position
+    to the nearest place the arm can really reach (inside the ring around the base, inside the pan range, below the
+    ceiling for that radius).
+    """
+    RADII = np.arange(0.04, 0.50, 0.02)
+    HEIGHTS = np.array([0.006, 0.02, 0.05, 0.09, 0.13, 0.17, 0.22])
+    _cache: dict = {}
+
+    def __init__(self, ik: "ArmIK", pan_half_range: float):
+        self.pan = pan_half_range
+        self.ok = np.zeros((len(self.RADII), len(self.HEIGHTS)), bool)
+        q = ik.q_down
+        for i, r in enumerate(self.RADII):
+            for j, z in enumerate(self.HEIGHTS):
+                q2, ep, er = ik.solve(ik.base + np.array([0.0, r, z]), 0.0, q, iters=200)
+                self.ok[i, j] = ep < 2e-3 and er < 0.08
+                if self.ok[i, j]:
+                    q = q2
+        low = self.ok[:, 1]                                   # table height
+        if not low.any():
+            raise ArmError("The arm cannot reach the table top with its tool pointing down.")
+        self.r_min = float(self.RADII[np.argmax(low)])
+        self.r_max = float(self.RADII[len(low) - 1 - np.argmax(low[::-1])])
+
+    @classmethod
+    def for_arm(cls, ik: "ArmIK", arm: ArmSpec) -> "Workspace":
+        key = (arm.name, str(arm.source), arm.mount_yaw_deg)
+        if key not in cls._cache:
+            lo, hi = ik.lo[0], ik.hi[0]
+            cls._cache[key] = cls(ik, float(min(abs(lo), abs(hi)) - 0.05))
+        return cls._cache[key]
+
+    def z_max(self, r: float) -> float:
+        i = int(np.clip(np.searchsorted(self.RADII, r), 0, len(self.RADII) - 1))
+        col = np.nonzero(self.ok[i])[0]
+        return float(self.HEIGHTS[col.max()]) if len(col) else 0.0
+
+    def reachable(self, rel_xy, z: float = 0.02) -> bool:
+        """rel_xy: position relative to the base."""
+        r = float(np.hypot(*rel_xy))
+        ang = abs(np.arctan2(rel_xy[0], rel_xy[1]))
+        return self.r_min - 0.005 <= r <= self.r_max + 0.005 and ang <= self.pan and z <= self.z_max(r) + 0.005
+
+    def clamp(self, rel, z_min: float = 0.004):
+        """A wanted tool position relative to the base -> the nearest reachable one."""
+        x, y, z = float(rel[0]), float(rel[1]), float(rel[2])
+        r = float(np.hypot(x, y))
+        ang = float(np.arctan2(x, y))                          # 0 = straight ahead
+        r2 = float(np.clip(r, self.r_min, self.r_max))
+        ang2 = float(np.clip(ang, -self.pan, self.pan))
+        if abs(y) < 1e-9 and abs(x) < 1e-9:
+            ang2 = 0.0
+        z2 = float(np.clip(z, z_min, max(self.z_max(r2), z_min)))
+        return np.array([r2 * np.sin(ang2), r2 * np.cos(ang2), z2])
+
+    def sample(self, rng, z: float = 0.02):
+        """A random reachable spot on the table, relative to the base (x, y)."""
+        for _ in range(1000):
+            r = rng.uniform(self.r_min + 0.01, self.r_max - 0.01)
+            ang = rng.uniform(-self.pan * 0.7, self.pan * 0.7)
+            if self.reachable((r * np.sin(ang), r * np.cos(ang)), z):
+                return (float(r * np.sin(ang)), float(r * np.cos(ang)))
+        raise ArmError("no reachable spot found")
+
+
+def fetch(arm: ArmSpec) -> list[Path]:
+    """Download the files of an arm that comes from the internet (only when asked)."""
+    d = arm.download
+    if not d:
+        print(f"'{arm.name}' needs no download.")
+        return []
+    base = arm.mjcf_path.parent
+    url = f"https://raw.githubusercontent.com/{d['repo']}/{d['commit']}/{d['path']}"
+    got = []
+    for rel in d["files"]:
+        dst = base / rel
+        if dst.exists():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(f"{url}/{rel}", timeout=60) as r:
+            dst.write_bytes(r.read())
+        got.append(dst)
+    print(f"{arm.name}: {len(got)} file(s) downloaded into {base} ({d['license']}, {d['credit']}).")
+    return got
+
+
+def main(argv=None):
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--list", action="store_true", help="the arms that are described")
+    ap.add_argument("--download", metavar="NAME", help="fetch the files of an arm (about 3 MB for so_arm100)")
+    ap.add_argument("--check", nargs="?", const="auto", metavar="NAME", help="load an arm and test it in the simulator")
+    a = ap.parse_args(argv)
+    if a.download:
+        fetch(load(a.download))
+    if a.list or not (a.download or a.check):
+        for n in list_arms():
+            arm = load(n)
+            miss = arm.missing_files()
+            print(f"  {n:12s} {'ready' if not miss else f'missing {len(miss)} file(s): --download {n}'}")
+        print(f"in use: {load().name}")
+    if a.check:
+        from . import armcheck
+        return armcheck.main(a.check)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

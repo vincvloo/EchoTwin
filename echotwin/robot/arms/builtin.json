@@ -1,0 +1,14 @@
+{
+  "name": "builtin",
+  "about": "A small desktop arm written in echotwin/robot/arm.py: base rotation, three bending joints, wrist roll, and a parallel two-finger gripper (8 cm opening, about 14 N per finger). Reach for a top-down grasp at table height: about 33 cm.",
+  "mjcf": "builtin",
+  "base_body": "base",
+  "mount_yaw_deg": 0,
+  "joints": ["pan", "lift", "elbow", "wflex", "roll"],
+  "actuators": ["pan", "lift", "elbow", "wflex", "roll"],
+  "gripper": {"mode": "parallel", "actuators": ["fl", "fr"], "open": [0.0, 0.0], "closed": [0.06, 0.06]},
+  "tool": {"body": "hand", "pos": [0, 0, 0.078], "point_axis": [0, 0, 1], "close_axis": [1, 0, 0]},
+  "pads": ["pad_"],
+  "home": [0.0, 0.6, 1.5, 1.05, 0.0],
+  "max_opening": 0.08
+}
