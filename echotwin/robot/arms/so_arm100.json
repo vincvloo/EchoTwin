@@ -11,6 +11,12 @@
   "pads": ["_pad_"],
   "home": [0.0, -1.57, 1.57, 1.57, -1.57],
   "max_opening": 0.07,
+  "real": {
+    "about": "Placeholders. Fill in from your arm (python -m echotwin.robot.feetech --read, docs/REAL_ARM.md), then set calibrated to true.",
+    "baudrate": 1000000, "ids": [1, 2, 3, 4, 5], "gripper_id": 6,
+    "zero_ticks": [2048, 2048, 2048, 2048, 2048], "direction": [1, 1, 1, 1, 1], "ticks_per_rad": 651.9,
+    "gripper_ticks": {"open": 2048, "closed": 1500}, "max_speed": 600, "acceleration": 50, "calibrated": false
+  },
   "download": {
     "repo": "google-deepmind/mujoco_menagerie",
     "commit": "71f066ad0be9cd271f7ed58c030243ef157af9f4",

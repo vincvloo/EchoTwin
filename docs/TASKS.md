@@ -26,8 +26,10 @@ In this order. Each step is only meaningful once the one before it is solid.
       table plane and the origin in 3D scans, and the camera height and angle in quick mode; 3D scans also get a table
       texture painted from the photos. Tested on synthetic scenes only. Open: check it on a real capture with a printed
       marker (error against a measured object), and place the real arm's base by the marker (PR11).
-- [ ] **PR11 One skill interface, two back-ends.** Skills output end-effector poses and gripper commands in metres;
-      the simulator and a real arm both implement it. A record of success rate in sim vs real on the same task.
+- [x] **PR11 One skill interface, two back-ends.** The robot contract is written down (`robot/backend.py`); the simulation and
+      a real arm (servo driver + the simulation as its twin) both fulfil it, switched by `BACKEND=sim|real`. No arm yet: the real
+      back-end is tested on a mock arm and a fake servo bus, and the sim-vs-mock success rate is in `docs/RESULTS.md`.
+      Open: the servo driver has never touched hardware (`docs/REAL_ARM.md`).
 - [ ] **PR12 Closed loop.** Re-detect the object before the grasp, check the gripper closed on something, retry.
       The existing "imagine first, then ask for help" behaviour fits this.
 - [ ] **PR13 Learning.** Demos are already stored in a LeRobot-style format. Train a policy (for example ACT) on real

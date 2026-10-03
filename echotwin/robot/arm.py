@@ -100,6 +100,7 @@ class ArmSpec:
     mount_yaw_deg: float = 0.0
     max_opening: float | None = None
     download: dict | None = None
+    real: dict | None = None        # servo ids and calibration for a real arm (see feetech.py)
     source: Path | None = None
 
     @property
@@ -156,7 +157,7 @@ def parse(d: dict, source: Path | None = None) -> ArmSpec:
                    actuators=list(d["actuators"]), gripper=dict(g), tool=dict(d["tool"]), pads=list(d["pads"]),
                    home=[float(v) for v in d["home"]], prefix=d.get("prefix", PREFIX),
                    mount_yaw_deg=float(d.get("mount_yaw_deg", 0.0)), max_opening=d.get("max_opening"),
-                   download=d.get("download"), source=source)
+                   download=d.get("download"), real=d.get("real"), source=source)
 
 
 # ---------------- putting the arm into a scene ----------------
