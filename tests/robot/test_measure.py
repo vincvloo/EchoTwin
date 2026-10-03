@@ -36,3 +36,52 @@ def test_old_task_without_measurement_gets_a_typical_one():
     m = M.from_task({"shape": "cylinder", "h": 0.05})
     assert m["legacy"] and m["height"] == pytest.approx(0.10) and m["width"] == pytest.approx(0.065)
     assert M.from_task({"m": {"width": 1, "height": 2, "length": 3, "mass": 4}})["width"] == 1
+
+
+# ---------------- skills on measurements ----------------
+def _demo(m, drop=0.004, dist=0.2):
+    return {"grip": 0.5, "lift": 0.05, "drop": drop, "speed": 0.2, "dist": dist, "m": m}
+
+
+BOX5 = {"width": 0.05, "height": 0.04, "length": 0.05, "mass": 0.1}
+
+
+def test_a_demo_counts_for_similar_sizes_only():
+    from echotwin.robot.features.prop_skills import PropSkills
+    s = PropSkills()
+    s.demos = [_demo(BOX5)]
+    box6 = {"width": 0.06, "height": 0.045, "length": 0.06, "mass": 0.15}
+    bar = {"width": 0.06, "height": 0.02, "length": 0.10, "mass": 0.04}
+    assert s.known(box6) and not s.known(bar)
+    assert s.counts() == {"flat": 0, "small": 0, "medium": 1, "tall": 0}
+
+
+def test_uncertainty_grows_with_distance_in_size():
+    from echotwin.robot.features.prop_skills import PropSkills
+    s = PropSkills()
+    s.demos = [_demo(BOX5), _demo(BOX5, 0.006)]
+    near = s.plan(BOX5, 0.2)["uncertainty"]
+    far = s.plan({"width": 0.06, "height": 0.07, "length": 0.06, "mass": 0.1}, 0.2)["uncertainty"]
+    assert far > near + 0.3
+
+
+def test_nearest_demos_decide_the_parameters():
+    from echotwin.robot.features.prop_skills import PropSkills
+    s = PropSkills()
+    tall = {"width": 0.07, "height": 0.10, "length": 0.07, "mass": 0.3}
+    s.demos = [{**_demo(BOX5), "lift": 0.03}, {**_demo(tall), "lift": 0.12}]
+    assert s.plan(BOX5, 0.2)["lift"] == pytest.approx(0.03)
+    assert s.plan(tall, 0.2)["lift"] == pytest.approx(0.12)
+
+
+def test_old_episodes_without_measurements_still_load():
+    from echotwin.robot.features.prop_skills import PropSkills
+    import numpy as np
+    frames = []
+    for i in range(10):                                   # hand goes down, grips, lifts, releases
+        carrying = 1.0 if 3 <= i < 8 else 0.0
+        frames.append({"state": [0, 0, 0.1, carrying, 0.1 * i, 0, 0.02, 0, 0, carrying], "action": [0.1, 0, 0, carrying]})
+    ep = {"success": True, "task": {"kind": "prop", "h": 0.02, "tallest": 0.1}, "frames": frames}   # no shape, no m
+    s = PropSkills()
+    s.fit([ep, {"success": True, "task": {"kind": "other"}, "frames": []}])
+    assert len(s.demos) == 1 and s.demos[0]["m"]["legacy"]

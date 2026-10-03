@@ -1,23 +1,24 @@
-"""Know-how per object type for everyday objects: learned from demos, checked by imagining the move first.
+"""Know-how for everyday objects: learned from demos, checked by imagining the move first.
 
-A "skill" is per shape: flat (paper, chocolate bar), box, cylinder (glass, bottle), round (case, ball).
+A skill belongs to a *size*, not to a name or a shape: the grip width, height and length of the object (`measure.py`).
 From every kept demo we learn, relative to the object:
   grip     how high to grip it (fraction of its half height above/below the centre)
   lift     how much clearance to lift it above the tallest thing on the table
   drop     how gently to set it down (hand height above the resting height at release)
   speed    how fast the demonstrator moved
+A new object is planned from the demos of objects of a similar size (the closer, the more they count).
 Before acting, the robot imagines the move on a copy of the world and checks the outcome:
 lands near the goal, stays upright, does not knock anything over.
 """
 import numpy as np
 
 from ..world import VMAX, World
+from . import measure as M
 
 MIN_PROP_DEMOS = 1
 ASK = 1.0
-KIND_WORDS = {"flat": "a flat thing like that", "box": "a box like that", "cylinder": "a glass-like thing",
-              "round": "a round thing like that"}
-KIND_LABEL = {"flat": "flat things", "box": "boxes", "cylinder": "glasses & bottles", "round": "round things"}
+KNOWN = 1.0                  # a demo this close in size (see measure.distance) counts as "a similar object"
+KIND_LABEL = M.CLASS_LABEL   # the dashboard cards: demos per size class
 DEFAULTS = {"grip": 1.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
 
 
@@ -165,32 +166,56 @@ def extract(ep: dict) -> dict | None:
     }
 
 
+def _wmedian(values, weights) -> float:
+    order = np.argsort(values)
+    v, w = np.asarray(values, float)[order], np.asarray(weights, float)[order]
+    c = np.cumsum(w)
+    return float(v[np.searchsorted(c, 0.5 * c[-1])])
+
+
 class PropSkills:
     def __init__(self):
-        self.demos: dict[str, list[dict]] = {}
+        self.demos: list[dict] = []          # {grip, lift, drop, speed, dist, m}
 
     def fit(self, episodes: list[dict]):
-        self.demos = {}
+        self.demos = []
         for ep in episodes:
-            if ep["task"].get("kind") != "prop" or not ep.get("success", True):
+            t = ep.get("task", {})
+            if t.get("kind") != "prop" or not ep.get("success", True):
                 continue
             k = extract(ep)
             if k:
-                self.demos.setdefault(ep["task"]["shape"], []).append(k)
+                k["m"] = M.from_task(t)
+                self.demos.append(k)
 
-    def count(self, shape: str) -> int:
-        return len(self.demos.get(shape, []))
+    def _near(self, m: dict) -> list[tuple[float, dict]]:
+        return [(M.distance(m, x["m"]), x) for x in self.demos]
+
+    def count(self, m: dict) -> int:
+        """Demos of objects of a similar size."""
+        return sum(d <= KNOWN for d, _ in self._near(m))
+
+    def known(self, m: dict) -> bool:
+        return self.count(m) >= MIN_PROP_DEMOS
 
     def counts(self) -> dict:
-        return {s: self.count(s) for s in KIND_LABEL}
+        """Demos per size class (for the dashboard)."""
+        out = {c: 0 for c in M.CLASSES}
+        for x in self.demos:
+            out[M.size_class(x["m"])] += 1
+        return out
 
-    def plan(self, shape: str, dist: float) -> dict:
-        ks = self.demos.get(shape, [])
-        if not ks:
+    def plan(self, m: dict, dist: float) -> dict:
+        near = self._near(m)
+        if not near:
             return {**DEFAULTS, "uncertainty": 9.0, "parts": {"demos": 0}}
-        med = {k: float(np.median([x[k] for x in ks])) for k in ("grip", "lift", "drop", "speed")}
-        novelty = min(abs(x["dist"] - dist) for x in ks) / 0.4
-        spread = float(np.std([x["drop"] for x in ks]) / 0.02) if len(ks) > 1 else 0.3
-        u = 0.15 + 0.4 / len(ks) + 0.5 * novelty + 0.3 * spread
+        w = np.array([np.exp(-(d / KNOWN) ** 2) for d, _ in near]) + 1e-6
+        ks = [x for _, x in near]
+        med = {k: _wmedian([x[k] for x in ks], w) for k in ("grip", "lift", "drop", "speed")}
+        n_eff = float(w.sum())
+        nearest = min(d for d, _ in near)
+        novelty = max(min(abs(x["dist"] - dist) for x in ks) / 0.4, nearest / KNOWN)
+        spread = float(np.sqrt(np.cov([x["drop"] for x in ks], aweights=w)) / 0.02) if len(ks) > 1 and n_eff > 1.01 else 0.3
+        u = 0.15 + 0.4 / max(n_eff, 1.0) + 0.5 * novelty + 0.3 * spread
         return {**med, "uncertainty": u,
-                "parts": {"demos": len(ks), "novelty": round(novelty, 2), "spread": round(spread, 2)}}
+                "parts": {"demos": self.count(m), "novelty": round(novelty, 2), "spread": round(spread, 2)}}
