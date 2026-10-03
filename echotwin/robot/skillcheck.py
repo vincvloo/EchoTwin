@@ -78,7 +78,8 @@ def make_task(w: World, plan: dict, heard: str) -> dict:
     return task
 
 
-def trial(shape: str, task_name: str, rng: np.random.Generator) -> dict:
+def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None) -> dict:
+    """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill."""
     k = _scale()
     probe = None
     try:
@@ -88,7 +89,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator) -> dict:
     for _ in range(60):             # draw until the arm can reach both the object and the spot (else it would decline)
         (ax, ay), (bx, by) = _spawn(rng, probe, k)
         lay = Layout()
-        lay.props = [_prop("mover", shape, SHAPES[shape], (ax, ay), k), _prop("other", "box", OTHER, (bx, by), k)]
+        lay.props = [_prop("mover", shape, size or SHAPES[shape], (ax, ay), k), _prop("other", "box", OTHER, (bx, by), k)]
         w = World(lay)
         w.settle(20)
         plan = {"prop": 0, "goal": ("near", 1, task_name) if task_name != "to the left" else ("dir", (-1, 0), 0.12 * k)}
@@ -100,9 +101,10 @@ def trial(shape: str, task_name: str, rng: np.random.Generator) -> dict:
         if not w.refusal("prop_0", goal):
             break
     task = make_task(w, plan, f"put the mover {task_name}")
-    wps = PS.waypoints(w, task, dict(PS.DEFAULTS))
+    style = skill_fn(task) if skill_fn else dict(PS.DEFAULTS)
+    wps = PS.waypoints(w, task, style)
     before = {n: w.obj_pos(n)[:2].copy() for n in w.things()}
-    r = {"wps": wps, "i": 0, "speed": PS.DEFAULTS["speed"]}
+    r = {"wps": wps, "i": 0, "speed": style["speed"]}
     if hasattr(w, "grasp_yaw"):
         r["yaw"] = w.grasp_yaw(task["object"])
     ticks = 0
@@ -118,7 +120,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator) -> dict:
     why = "" if ok else (res["text"] if not res["ok"] else "it did not end where it should")
     if ticks >= MAX_TICKS:
         why, ok = "ran out of time", False
-    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT}
+    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT, "style": style, "task": task}
 
 
 def reason_key(why: str) -> str:
@@ -160,6 +162,78 @@ def table(res: dict) -> str:
     return "\n".join(lines)
 
 
+# ---------------- do skills carry over to other sizes? ----------------
+HARD = False        # --hard: only tall, wide-ish things, where the default skill fails most
+
+
+def random_object(rng) -> tuple[str, tuple]:
+    """A random everyday-sized object, full size (x, y, z) in metres: width 3 to 7 cm, height 2 to 12 cm."""
+    shape = str(rng.choice(["box", "cylinder"] if HARD else ["box", "cylinder", "round"]))
+    wd = float(rng.uniform(0.055, 0.07) if HARD else rng.uniform(0.03, 0.07))
+    if shape == "round":
+        return shape, (wd, wd, wd)
+    h = float(rng.uniform(0.08, 0.13) if HARD else rng.uniform(0.02, 0.12))
+    return shape, ((wd, wd * float(rng.uniform(1.0, 1.4)), h) if shape == "box" else (wd, wd, h))
+
+
+def random_style(rng) -> dict:
+    return {"grip": float(rng.uniform(-0.5, 1.0)), "lift": float(rng.uniform(0.03, 0.09)),
+            "drop": float(rng.uniform(0.002, 0.012)), "speed": float(rng.uniform(0.14, 0.25))}
+
+
+def _median_style(demos: list[dict]) -> dict:
+    if not demos:
+        return dict(PS.DEFAULTS)
+    return {k: float(np.median([d[k] for d in demos])) for k in ("grip", "lift", "drop", "speed")}
+
+
+def transfer(n_objects: int = 8, tries: int = 6, seed: int = 11) -> dict:
+    """Learn from practice on some objects, then move seen-size and unseen-size objects with four ways of choosing
+    the skill: the defaults, the old per-shape key, per size class, and from measurements (nearest sizes)."""
+    from .features import measure as M
+    rng = np.random.default_rng(seed)
+    objs = [random_object(rng) for _ in range(n_objects)]
+    probe = World(Layout())
+    objs = [o for o in objs if _can(o, probe)]
+    demos = []                                           # practice: varied styles, keep the ones that worked
+    for i, (shape, size) in enumerate(objs):
+        for j in range(tries):
+            r = trial(shape, TASKS[(i + j) % 3], np.random.default_rng(seed * 100 + i * 10 + j), size, lambda t, s=random_style(rng): s)
+            if r["ok"]:
+                t = r["task"]
+                demos.append({**r["style"], "dist": float(np.linalg.norm(np.array(t["goal"]) - np.array(t["start"]))),
+                              "m": t["m"], "shape": shape, "cls": M.size_class(t["m"])})
+    skills = PS.PropSkills()
+    skills.demos = demos
+    ways = {
+        "defaults": lambda t: dict(PS.DEFAULTS),
+        "per shape (old)": lambda t: _median_style([d for d in demos if d["shape"] == t["shape"]]),
+        "per size class": lambda t: _median_style([d for d in demos if d["cls"] == M.size_class(t["m"])]),
+        "from measurements": lambda t: {k: v for k, v in skills.plan(t["m"], 0.2).items() if k in PS.DEFAULTS},
+    }
+    unseen = []
+    while len(unseen) < n_objects * 2:
+        o = random_object(rng)
+        if _can(o, probe):
+            unseen.append(o)
+    out = {"objects": len(objs), "demos": len(demos), "rows": {}}
+    for label, group in (("seen sizes", objs), ("unseen sizes", unseen)):
+        for way, fn in ways.items():
+            rs = [trial(s, tk, np.random.default_rng(seed * 7 + i * 3 + j), z, fn)
+                  for i, (s, z) in enumerate(group) for j, tk in enumerate(TASKS)]
+            asks = sum(not skills.known(r["task"]["m"]) for r in rs if "task" in r)
+            out["rows"][f"{label} | {way}"] = {"success": float(np.mean([r["ok"] for r in rs])), "n": len(rs), "ask": asks}
+            print(f"  {label:13s} {way:18s} {out['rows'][f'{label} | {way}']['success']:4.0%} of {len(rs)}  (would ask {asks})", flush=True)
+    return out
+
+
+def _can(obj, probe: World) -> bool:
+    shape, size = obj
+    lay = Layout()
+    lay.props = [_prop("x", shape, size, (0.0, -0.05), 1.0)]
+    return World(lay).can_grasp("prop_0")[0]
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trials", type=int, default=6)
@@ -167,7 +241,17 @@ def main(argv=None):
     ap.add_argument("--tasks", nargs="+", default=list(TASKS), choices=list(TASKS))
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="out/skillcheck.json")
+    ap.add_argument("--transfer", action="store_true", help="do skills learned on some sizes work on other sizes?")
+    ap.add_argument("--hard", action="store_true", help="with --transfer: only tall, wide things")
+    ap.add_argument("--objects", type=int, default=8, help="with --transfer: objects to practise on")
     a = ap.parse_args(argv)
+    if a.transfer:
+        global HARD
+        HARD = a.hard
+        res = transfer(a.objects, seed=a.seed)
+        Path("out").mkdir(exist_ok=True)
+        Path("out/skillcheck_transfer.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+        return 0
     res = run(a.trials, a.shapes, a.tasks, a.seed)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
