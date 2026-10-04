@@ -89,6 +89,7 @@ Each step also runs by itself:
 | Review with a vision model (optional) | `python -m echotwin.perception.review data/table.ply out/table_scene.json` |
 | Objects -> robot twin | `python -m echotwin.scene.to_twin out/table_scene.json --out data/twin.zip` |
 | Which detector is best? | `python -m echotwin.perception.bench_detect yolo11s-seg.pt yoloe-26s-seg.pt:text=objects365` |
+| Train a policy from demos | [docs/LEARNING.md](docs/LEARNING.md) |
 | Run on a real arm (or the mock one) | `BACKEND=real` in `.env`, see [docs/REAL_ARM.md](docs/REAL_ARM.md) |
 | Use another arm | `python -m echotwin.robot.arm --list` and [docs/ARMS.md](docs/ARMS.md) |
 | Tests | `python -m pytest -q tests/perception tests/scene` and `<robot python> -m pytest -q tests/robot tests/scene` |

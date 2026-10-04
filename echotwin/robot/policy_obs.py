@@ -17,10 +17,21 @@ from __future__ import annotations
 import numpy as np
 
 OBS_DIM, ACT_DIM = 18, 5
+FEAT_DIM = 26                      # what the network gets: the observation plus the offsets between its parts (see featurize)
 T_SCALE = 400.0
 OBS_NAMES = ("hand.x", "hand.y", "hand.z", "grip", "obj.x", "obj.y", "obj.z", "goal.x", "goal.y", "carrying",
              "width", "height", "length", "stack", "sin_yaw", "cos_yaw", "t", "ref_top")
 ACT_NAMES = ("vx", "vy", "vz", "grip", "yaw")
+
+
+def featurize(obs) -> np.ndarray:
+    """What the network sees: the 18 observed numbers plus 8 offsets that a policy would otherwise have to learn from a few hundred
+    distinct layouts: object - tool (3), goal - tool (2), goal - object (2), top of the stack - tool height (1). Works on one
+    observation or on a batch (..., 18)."""
+    x = np.asarray(obs, np.float32)
+    hand, obj, goal = x[..., 0:3], x[..., 4:7], x[..., 7:9]
+    extra = np.concatenate([obj - hand, goal - hand[..., :2], goal - obj[..., :2], (x[..., 17] - hand[..., 2])[..., None]], axis=-1)
+    return np.concatenate([x, extra], axis=-1).astype(np.float32)
 
 
 def build(state10, m: dict, stack: bool, yaw: float, t: int, ref_top: float = 0.0) -> np.ndarray:

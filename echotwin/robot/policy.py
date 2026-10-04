@@ -14,6 +14,7 @@ from . import policy_obs as O
 from .world import VMAX
 
 ENSEMBLE_M = 0.05
+CLIP = 6.0                # normalised inputs are limited to this many standard deviations
 GOAL_HOLD = 10            # ticks with the goal met and the jaws open before the move counts as finished
 MAX_TICKS = 600
 
@@ -38,7 +39,7 @@ class ChunkPolicy:
 
     def predict(self, obs) -> np.ndarray:
         """The next K actions for one observation, (K, 5), in real units."""
-        x = (np.asarray(obs, np.float32) - self.p["obs_mean"]) / self.p["obs_std"]
+        x = np.clip((O.featurize(obs) - self.p["obs_mean"]) / self.p["obs_std"], -CLIP, CLIP)       # a state far from the demos stays bounded
         for i in range(self.n_layers):
             x = x @ self.p[f"W{i}"] + self.p[f"b{i}"]
             if i < self.n_layers - 1:

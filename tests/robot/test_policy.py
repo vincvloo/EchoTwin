@@ -15,7 +15,7 @@ from echotwin.robot.world import World
 K = 4
 
 
-def tiny(chunk_fn=None, obs_dim=O.OBS_DIM):
+def tiny(chunk_fn=None, obs_dim=O.FEAT_DIM):
     """A one-layer 'network' whose output is a fixed chunk (zero weights, bias = the chunk)."""
     chunk = np.zeros((K, O.ACT_DIM), np.float32) if chunk_fn is None else chunk_fn
     return P.ChunkPolicy({"K": np.array(K), "obs_mean": np.zeros(obs_dim, np.float32), "obs_std": np.ones(obs_dim, np.float32),
@@ -31,12 +31,12 @@ def test_predict_gives_a_chunk_in_real_units():
 
 def test_the_hidden_layers_are_relu_and_the_normalisation_is_undone():
     rng = np.random.default_rng(0)
-    W0, W1 = rng.normal(size=(O.OBS_DIM, 8)).astype(np.float32), rng.normal(size=(8, K * 5)).astype(np.float32)
-    p = {"K": np.array(K), "obs_mean": np.ones(O.OBS_DIM, np.float32), "obs_std": 2 * np.ones(O.OBS_DIM, np.float32),
+    W0, W1 = rng.normal(size=(O.FEAT_DIM, 8)).astype(np.float32), rng.normal(size=(8, K * 5)).astype(np.float32)
+    p = {"K": np.array(K), "obs_mean": np.ones(O.FEAT_DIM, np.float32), "obs_std": 2 * np.ones(O.FEAT_DIM, np.float32),
          "act_mean": 3 * np.ones(5, np.float32), "act_std": 0.5 * np.ones(5, np.float32),
          "W0": W0, "b0": np.zeros(8, np.float32), "W1": W1, "b1": np.zeros(K * 5, np.float32)}
     x = rng.normal(size=O.OBS_DIM).astype(np.float32)
-    want = (np.maximum((x - 1) / 2 @ W0, 0) @ W1).reshape(K, 5) * 0.5 + 3
+    want = (np.maximum((O.featurize(x) - 1) / 2 @ W0, 0) @ W1).reshape(K, 5) * 0.5 + 3
     assert np.allclose(P.ChunkPolicy(p).predict(x), want, atol=1e-5)
 
 
@@ -176,3 +176,12 @@ def test_the_app_moves_with_the_policy_when_one_is_set(monkeypatch, tmp_path):
     text = "put the cube next to the mark"
     s.handle_prop_task(MT.parse(text, s.world.layout.props), text)
     assert s.replay is not None and isinstance(s.replay.get("policy"), P.LearnedExecutor) and s.mode == "move"
+
+
+def test_a_state_far_from_the_demos_cannot_blow_the_output_up():
+    p = dict(tiny().p)
+    p["obs_std"] = np.full(O.FEAT_DIM, 1e-6, np.float32)          # a column that never varied in the demos
+    p["W0"] = np.ones((O.FEAT_DIM, K * 5), np.float32)
+    p["b0"] = np.zeros(K * 5, np.float32)
+    out = P.ChunkPolicy(p).predict(np.ones(O.OBS_DIM))
+    assert np.isfinite(out).all() and np.abs(out).max() <= P.CLIP * O.FEAT_DIM + 1e-3

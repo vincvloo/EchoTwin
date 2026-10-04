@@ -69,3 +69,16 @@ def test_stored_json_demos_are_converted_with_their_source(tmp_path):
     assert info["episodes"] == 2 and info["sources"] == {"human": 1, "practice": 1} and info["legacy"] == 2
     z = np.load(tmp_path / "out" / "shard_0000.npz")
     assert len(z["obs"]) == 16 and list(z["source"]) == ["human", "practice"]
+
+
+def test_featurize_adds_the_offsets_the_network_needs():
+    obs = np.zeros(O.OBS_DIM, np.float32)
+    obs[0:3] = [0.1, 0.2, 0.3]            # tool
+    obs[4:7] = [0.4, 0.5, 0.6]            # object
+    obs[7:9] = [0.7, 0.8]                 # goal
+    obs[17] = 0.9                         # top of the stack
+    f = O.featurize(obs)
+    assert f.shape == (O.FEAT_DIM,) and np.allclose(f[:18], obs)
+    assert np.allclose(f[18:21], [0.3, 0.3, 0.3]) and np.allclose(f[21:23], [0.6, 0.6]) and np.allclose(f[23:25], [0.3, 0.3])
+    assert f[25] == pytest.approx(0.6)
+    assert O.featurize(np.stack([obs, obs])).shape == (2, O.FEAT_DIM)

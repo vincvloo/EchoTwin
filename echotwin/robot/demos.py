@@ -29,7 +29,13 @@ def _setup(rng):
     """A random object and spot, a random task, a world with the arm able to do it. Returns (world, task) or None."""
     from . import skillcheck as S
     probe = World(Layout())
-    shape, size = S.random_object(rng)
+    if rng.random() < 0.4:                                   # the named test objects (a 10 x 6 cm bar, a box wider than deep, ...)
+        shape = str(rng.choice(list(S.SHAPES)))
+        size = S.SHAPES[shape]
+    else:
+        shape, size = S.random_object(rng)
+        if rng.random() < 0.5:                               # turn it a quarter: the jaws must close the other way
+            size = (size[1], size[0], size[2])
     task_name = str(rng.choice(S.TASKS))
     for _ in range(60):
         (ax, ay), (bx, by) = S._spawn(rng, probe, 1.0)

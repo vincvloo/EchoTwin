@@ -16,10 +16,10 @@ from pathlib import Path
 
 import numpy as np
 
-OBS_DIM, ACT_DIM = 18, 5
+OBS_DIM, ACT_DIM = 26, 5            # the featurized observation (policy_obs.featurize)
 
 
-def load(folders, human_weight: float = 1.0):
+def load(folders, human_weight: float = 1.0, max_episodes: int | None = None):
     """(obs, act, episode id, sample weight) over all shards; episode ids are made unique across folders."""
     O, A, E, W, base = [], [], [], [], 0
     for folder in folders:
@@ -36,7 +36,11 @@ def load(folders, human_weight: float = 1.0):
             base += int(ep.max()) + 1
     if not O:
         raise SystemExit("no shard_*.npz found: run echotwin.robot.demos first")
-    return np.concatenate(O), np.concatenate(A), np.concatenate(E), np.concatenate(W).astype(np.float32)
+    O, A, E, W = np.concatenate(O), np.concatenate(A), np.concatenate(E), np.concatenate(W).astype(np.float32)
+    if max_episodes is not None:                       # only the first N episodes (for "how many demos are enough?")
+        keep = E < max_episodes
+        O, A, E, W = O[keep], A[keep], E[keep], W[keep]
+    return O, A, E, W
 
 
 def chunk_targets(act: np.ndarray, ep: np.ndarray, K: int) -> np.ndarray:
@@ -53,20 +57,25 @@ def chunk_targets(act: np.ndarray, ep: np.ndarray, K: int) -> np.ndarray:
 
 
 def train(folders, out: str, K: int = 10, hidden: int = 256, layers: int = 3, epochs: int = 60, batch: int = 1024, lr: float = 1e-3,
-          human_weight: float = 1.0, seed: int = 0, log=print) -> dict:
+          human_weight: float = 1.0, seed: int = 0, max_episodes: int | None = None, grip_weight: float = 1.0, log=print) -> dict:
     import torch
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    obs, act, ep, w = load(folders, human_weight)
+    obs, act, ep, w = load(folders, human_weight, max_episodes)
+    from . import policy_obs
+    obs = policy_obs.featurize(obs)
     Y = chunk_targets(act, ep, K)
     eps = np.unique(ep)
     val_eps = set(rng.choice(eps, max(1, len(eps) // 10), replace=False).tolist()) if len(eps) > 1 else set()
     is_val = np.array([e in val_eps for e in ep])
-    om, os_ = obs[~is_val].mean(0), obs[~is_val].std(0) + 1e-6
+    om, os_ = obs[~is_val].mean(0), np.maximum(obs[~is_val].std(0), 0.005)      # a floor: a column that never varied cannot blow up
     am, as_ = act[~is_val].mean(0), act[~is_val].std(0) + 1e-6
     X = torch.tensor((obs - om) / os_)
     T = torch.tensor(((Y - am) / as_).reshape(len(Y), -1))
     Wt = torch.tensor(w)
+    dim_w = torch.ones(K, ACT_DIM)
+    dim_w[:, 3] = grip_weight                                   # opening and closing the jaws is rare and decisive
+    dim_w = (dim_w / dim_w.mean()).reshape(-1).to("cuda" if torch.cuda.is_available() else "cpu")
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     dims = [OBS_DIM] + [hidden] * layers + [K * ACT_DIM]
     net = torch.nn.Sequential(*[m for i in range(len(dims) - 1) for m in
@@ -81,7 +90,7 @@ def train(folders, out: str, K: int = 10, hidden: int = 256, layers: int = 3, ep
         perm = torch.tensor(rng.permutation(tr), device=dev)
         for i in range(0, len(perm), batch):
             b = perm[i:i + batch]
-            loss = ((net(Xd[b]) - Td[b]).abs().mean(1) * Wd[b]).mean()
+            loss = (((net(Xd[b]) - Td[b]).abs() * dim_w).mean(1) * Wd[b]).mean()
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -113,10 +122,14 @@ def main(argv=None) -> int:
     ap.add_argument("--chunk", type=int, default=10)
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--hidden", type=int, default=256)
+    ap.add_argument("--layers", type=int, default=3)
     ap.add_argument("--human-weight", type=float, default=1.0, help="count human / video demos this many times as much")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--grip-weight", type=float, default=1.0, help="weight of the grip output in the loss (5 helps it let go)")
+    ap.add_argument("--max-episodes", type=int, default=None, help="use only the first N episodes")
     a = ap.parse_args(argv)
-    print(train(a.folders, a.out, a.chunk, a.hidden, epochs=a.epochs, human_weight=a.human_weight, seed=a.seed))
+    print(train(a.folders, a.out, a.chunk, a.hidden, layers=a.layers, epochs=a.epochs, human_weight=a.human_weight, seed=a.seed, max_episodes=a.max_episodes,
+                grip_weight=a.grip_weight))
     return 0
 
 
