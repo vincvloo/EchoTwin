@@ -240,6 +240,8 @@ class Sim:
     # ---------------- replaying a move ----------------
     def _replay_step(self):
         a = PS.waypoint_action(self.world, self.replay)
+        for line in self.replay.pop("events", []):         # what the closed loop noticed: said as it happens
+            self.say(line)
         if a is None:
             if self.mode == "move":  # let the object settle before judging
                 self.replay["settle"] = self.replay.get("settle", 0) + 1
@@ -288,6 +290,7 @@ class Sim:
         skill = self.skills.plan(m, float(np.linalg.norm(goal - o[:2])))
         wps = PS.waypoints(w, task, skill)
         im = PS.imagine(w, task, wps, skill["speed"])
+        looped = PS.closed_loop_on(w)
         u = skill["uncertainty"] + (0 if im["ok"] else 0.8)
         why = f"{n} demo{'s' if n != 1 else ''} of a similar size · imagined: {im['text']}"
         if not im["ok"] or u >= PS.ASK:
@@ -295,7 +298,10 @@ class Sim:
                                      line=f"I tried it in my head: {im['text']}. Can you show me how?")
         self.plan = {"uncertainty": u, "parts": skill["parts"], "why": why}
         self.ghost = im["path"]
-        self.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": w.grasp_yaw(task["object"]),
+        loop = None
+        if looped:                                          # look first, check each step, retry: see prop_skills.loop_start
+            wps, loop = PS.loop_start(w, task, skill)
+        self.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": w.grasp_yaw(task["object"]), "loop": loop,
                        "before": {k: w.obj_pos(k)[:2].copy() for k in w.things()}}
         self.mode, self.authority = "move", "robot"
         self.emit({"t": "decision", "kind": "do", "task": task, "uncertainty": round(u, 2), "sure": T.percent_sure(u),
@@ -432,7 +438,8 @@ class Sim:
             t = r["task"]
             self.mode, self.authority, self.ghost = "idle", "human", None
             res = PS.outcome(w, t, r["before"])
-            runlog.record(w.name, t, res, self.dataset.root.parent / "runs.jsonl")
+            attempts = (r.get("loop") or {}).get("attempts")
+            runlog.record(w.name, t, res, self.dataset.root.parent / "runs.jsonl", attempts=attempts)
             self.robot_runs["runs"] += 1
             if res["ok"]:
                 self.robot_runs["success"] += 1
@@ -668,5 +675,6 @@ class Sim:
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
             "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready()},
+            "attempt": ((self.replay or {}).get("loop") or {}).get("attempts", 0) + 1 if self.mode == "move" and (self.replay or {}).get("loop") else None,
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,
         })

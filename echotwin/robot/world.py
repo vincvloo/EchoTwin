@@ -280,6 +280,31 @@ class World:
     def arm_ready(self) -> bool:
         return True
 
+    def observe_pose(self, away_from=None) -> np.ndarray:
+        """Where to hold the tool to look at the table. Folded in just in front of the base; with `away_from` (x, y), held high
+        out to the side of the base opposite to that spot, so the arm does not hide what is looked at or pass low over it."""
+        r = self.workspace.r_min + 0.03
+        if away_from is None:
+            return np.array([self.base[0], self.base[1] + r, 0.06])
+        side = -1.0 if away_from[0] >= self.base[0] else 1.0       # high and to the side: nothing low to sweep through objects
+        return np.array([self.base[0] + side * 0.20, self.base[1] + 0.10, self.carry_height()])
+
+    def observe(self, name: str):
+        """Look at an object: its table position (x, y), or None when it cannot be seen. The simulation is its own truth."""
+        return self.obj_pos(name)[:2].copy()
+
+    def set_obj_pose(self, name: str, xy, d=None):
+        """Move an object to (x, y) at its current height: used to correct what the robot believes. Velocity is cleared."""
+        d = d if d is not None else self.data
+        a, v = self.obj_qadr[name], self.obj_dadr[name]
+        d.qpos[a:a + 2] = np.asarray(xy, float)[:2]
+        d.qvel[v:v + 6] = 0.0
+        mujoco.mj_forward(self.model, d)
+
+    def nudge(self, name: str, dxy):
+        """Push an object by (dx, dy) metres, as if somebody moved it (for tests and the disturbance check)."""
+        self.set_obj_pose(name, self.obj_pos(name)[:2] + np.asarray(dxy, float)[:2])
+
     def tilt(self, name: str, d=None) -> float:
         """Angle (degrees) between an object's up axis and the world's."""
         d = d if d is not None else self.data

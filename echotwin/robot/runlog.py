@@ -17,13 +17,14 @@ from .features import measure as M
 PATH = config.DATA / "runs.jsonl"
 
 
-def record(backend: str, task: dict, res: dict, path: Path = PATH, seconds: float | None = None) -> dict:
+def record(backend: str, task: dict, res: dict, path: Path = PATH, seconds: float | None = None,
+           attempts: int | None = None) -> dict:
     """Append one move. `res` is what `prop_skills.outcome` returned ({ok, text, err, tilt, moved})."""
     m = M.from_task(task)
     row = {"time": round(time.time()), "backend": backend, "object": task.get("name"), "class": M.size_class(m),
            "width": round(m["width"], 3), "height": round(m["height"], 3), "length": round(m["length"], 3),
            "instruction": task.get("instruction"), "ok": bool(res.get("ok")), "why": "" if res.get("ok") else res.get("text", ""),
-           "err_cm": round(100 * float(res.get("err", 0.0)), 1), "seconds": None if seconds is None else round(seconds, 1)}
+           "err_cm": round(100 * float(res.get("err", 0.0)), 1), "seconds": None if seconds is None else round(seconds, 1), "attempts": attempts}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row) + "\n")

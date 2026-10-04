@@ -124,3 +124,18 @@ def test_a_new_layout_rebuilds_the_mock_world():
     r, drv = _real(_layout(CUBE))
     r.build(_layout(("a", "box", (0.1, 0.0), (0.02, 0.02, 0.02)), ("b", "box", (-0.1, 0.0), (0.02, 0.02, 0.02))))
     assert len(drv.plant.things()) == 2 and len(r.things()) == 2
+
+
+def test_the_tool_target_never_runs_away_from_a_lagging_arm():
+    r, _ = _real(_layout(CUBE), lag=0.15)                 # a very sluggish arm
+    worst = 0.0
+    for _ in range(80):
+        r.step((0.0, 0.0, -0.25, 0, 0.0))                 # keep asking for downward motion
+        worst = max(worst, float(np.linalg.norm(r.twin.hand.target - r.hand_pos())))
+    assert worst < R.MAX_LEAD + 0.01
+    for _ in range(40):
+        r.step((0.0, 0.0, 0.0, 0, 0.0))                   # asked to stand still: it does not keep sinking
+    z = r.hand_pos()[2]
+    for _ in range(40):
+        r.step((0.0, 0.0, 0.0, 0, 0.0))
+    assert abs(r.hand_pos()[2] - z) < 0.004

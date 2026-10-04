@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from .drivers import Driver
+from .drivers import Driver, closure
 from .world import CTRL_DT, World
 
 REAL_SPEED = 0.5            # a real arm moves at half the simulation's tool speed
+MAX_LEAD = 0.02             # the tool target is never more than this far ahead of the measured tool (m)
 SETTLED = 0.02              # the gripper closure changes less than this per tick: it has stopped
 CLOSED_ALL_THE_WAY = 0.95   # a closure above this means the jaws met nothing (or the object slipped out)
+DISAGREE = 0.25             # the real jaws and the twin's jaws are this far apart (fraction of the travel): they do not hold the same thing
 
 
 class TruthObserver:
@@ -25,6 +27,13 @@ class TruthObserver:
         return self.plant.tilt(name)
 
 
+def mock_camera(driver) -> "CameraObserver":
+    """A top-down camera over the mock arm's own world."""
+    from .observe import CameraObserver, RenderSource
+    src = RenderSource(lambda: driver.plant)
+    return CameraObserver(src, lambda: src.plane(driver.plant))
+
+
 class RealBackend:
     """An arm moved by servos, with the simulation running beside it as its twin.
 
@@ -35,8 +44,11 @@ class RealBackend:
     """
     name = "real"
 
-    def __init__(self, twin: World, driver: Driver, observer=None, speed: float = REAL_SPEED, armed: bool = True):
-        self.twin, self.driver, self.observer, self.speed = twin, driver, observer, speed
+    def __init__(self, twin: World, driver: Driver, observer=None, speed: float = REAL_SPEED, armed: bool = True,
+                 camera=None):
+        """`observer`: a source of object truth (the mock's own world: for judging in tests). `camera`: a CameraObserver the
+        robot looks through (`observe`); without one it can only believe the twin."""
+        self.twin, self.driver, self.observer, self.camera, self.speed = twin, driver, observer, camera, speed
         self.stopped, self.armed = False, armed
         self.q_meas, self.closure, self._closure_prev = np.zeros(5), 0.0, 0.0
         driver.connect(twin.hand.q)
@@ -73,9 +85,13 @@ class RealBackend:
         self.driver.advance(CTRL_DT)
         self._read()
         tw.hand.q = self.q_meas.copy()                          # the next setpoint starts from where the arm is
+        err = tw.hand.target - self.hand_pos()                  # the arm lags behind its target: do not let the target run away
+        n = float(np.linalg.norm(err))                          # from it (it would keep sinking after the move is "done")
+        if n > MAX_LEAD:
+            tw.hand.target = self.hand_pos() + err * (MAX_LEAD / n)
         tw.advance(tw.data, tw.hand, q=self.q_meas)
-        if tw.hand.held and self.closure > CLOSED_ALL_THE_WAY:  # the twin thinks it holds something; the jaws say they met nothing
-            tw.hand.held = None
+        if tw.hand.held and (self.closure > CLOSED_ALL_THE_WAY or abs(self.closure - closure(tw, tw.data)) > DISAGREE):
+            tw.hand.held = None          # the twin's jaws stopped on an object; the real jaws did not (they went further): nothing is held
 
     def hand_pos(self, d=None):
         if d is not None:
@@ -107,6 +123,19 @@ class RealBackend:
         self.build(layout or self.twin.layout)
 
     # ---------- the scene
+    def observe(self, name):
+        """Look at an object and move the twin's belief to where it is seen. The position, or None if it is not seen."""
+        tw = self.twin
+        if self.camera is None:
+            return self.obj_pos(name)[:2].copy()
+        others = [(*tw.obj_pos(n)[:2], tw.half(n)) for n in tw.things() if n != name]
+        hand = self.hand_pos()
+        others += [(tw.base[0], tw.base[1], 0.04), (hand[0], hand[1], hand[2])]      # the arm's base and tool are not objects
+        est = self.camera.observe(name, tw.obj_pos(name)[:2], 2 * tw.radius(name), tw.half(name), others)
+        if est is not None and not tw.hand.held:
+            tw.set_obj_pose(name, est)
+        return est
+
     def obj_pos(self, name, d=None):
         if d is None and self.observer is not None:
             return self.observer.obj_pos(name)
