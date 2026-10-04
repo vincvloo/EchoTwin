@@ -79,7 +79,7 @@ def make_task(w: World, plan: dict, heard: str) -> dict:
 
 
 def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim",
-          loop: bool = False, disturb: str | None = None) -> dict:
+          loop: bool = False, disturb: str | None = None, policy=None) -> dict:
     """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill;
     `backend` is sim (the simulation is the robot) or mock (the mock arm: a perturbed second world, judged by its own objects).
     `loop`: look before gripping, check, retry (prop_skills.loop_start). `disturb`: push the object 3 to 6 cm, either
@@ -125,6 +125,9 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     else:
         wps, lp = PS.waypoints(w, task, style), None
     r = {"wps": wps, "i": 0, "speed": style["speed"], "loop": lp}
+    if policy is not None:                                  # a learned policy instead of the scripted steps
+        from .policy import LearnedExecutor
+        r["policy"] = LearnedExecutor(policy, task)
     if hasattr(w, "grasp_yaw"):
         r["yaw"] = w.grasp_yaw(task["object"])
     ticks = 0
@@ -157,13 +160,13 @@ def reason_key(why: str) -> str:
     return why[:40] or "ok"
 
 
-def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None) -> dict:
+def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None, policy=None) -> dict:
     rng = np.random.default_rng(seed)
     out = {"scale": _scale(), "trials": trials, "backend": backend, "loop": loop, "disturb": disturb, "cells": {}}
     for s in shapes:
         for t in tasks:
             t0 = time.time()
-            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb) for _ in range(trials)]
+            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb, policy=policy) for _ in range(trials)]
             wins = [r for r in rs if r["ok"]]
             out["cells"][f"{s} | {t}"] = {
                 "success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
@@ -281,6 +284,7 @@ def main(argv=None):
     ap.add_argument("--out", default="out/skillcheck.json")
     ap.add_argument("--backend", choices=["sim", "mock", "both"], default="sim",
                     help="mock: the mock arm (lag, encoder offsets, heavier objects); both: run each and show the gap")
+    ap.add_argument("--policy", metavar="NPZ", help="move with this trained policy (train_policy.py) instead of the scripted skill")
     ap.add_argument("--loop", action="store_true", help="look before gripping, check the grasp and the goal, retry (PR12)")
     ap.add_argument("--ab", action="store_true", help="run open loop and closed loop on the chosen backend and show both")
     ap.add_argument("--disturb", choices=["before", "during"], default=None,
@@ -307,7 +311,11 @@ def main(argv=None):
         Path("out/skillcheck_loop.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         print("\n" + gap_table(res["open"], res["closed"], ("open loop", "closed loop")))
         return 0
-    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb)
+    pol = None
+    if a.policy:
+        from .policy import ChunkPolicy
+        pol = ChunkPolicy.load(a.policy)
+    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb, policy=pol)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("\n" + table(res))

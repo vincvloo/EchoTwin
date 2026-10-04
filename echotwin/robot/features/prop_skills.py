@@ -213,6 +213,8 @@ def waypoint_action(world: World, r: dict, d=None, hs=None):
     """Next action along r["wps"]; advances r. Returns None when finished.
     With r["loop"] (see loop_start) the list also has observe and check steps, which look and may re-plan or retry."""
     hs = hs if hs is not None else world.hand
+    if r.get("policy") is not None:                         # a learned policy drives this move (see policy.LearnedExecutor)
+        return r["policy"].action(world, d, hs)
     if r["i"] >= len(r["wps"]):
         return None
     kind, arg = r["wps"][r["i"]]

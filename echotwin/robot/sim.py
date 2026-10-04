@@ -13,6 +13,7 @@ import mujoco
 import numpy as np
 
 from . import backend as BK
+from . import policy as POL
 from . import config
 from . import runlog
 from .dataset import Dataset, score_episode, state_vector
@@ -34,6 +35,7 @@ class Sim:
         self.emit = emit
         self.voice = Voice(emit)
         self.world, self.backend_note = BK.make()
+        self.policy, self.policy_note = POL.from_env()
         self.base_layout = self.world.layout.copy()
         self.rng = np.random.default_rng()
         self.dataset = Dataset()
@@ -290,7 +292,7 @@ class Sim:
         skill = self.skills.plan(m, float(np.linalg.norm(goal - o[:2])))
         wps = PS.waypoints(w, task, skill)
         im = PS.imagine(w, task, wps, skill["speed"])
-        looped = PS.closed_loop_on(w)
+        looped = PS.closed_loop_on(w) and self.policy is None      # a learned policy has no steps to check
         u = skill["uncertainty"] + (0 if im["ok"] else 0.8)
         why = f"{n} demo{'s' if n != 1 else ''} of a similar size · imagined: {im['text']}"
         if not im["ok"] or u >= PS.ASK:
@@ -303,6 +305,8 @@ class Sim:
             wps, loop = PS.loop_start(w, task, skill)
         self.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": w.grasp_yaw(task["object"]), "loop": loop,
                        "before": {k: w.obj_pos(k)[:2].copy() for k in w.things()}}
+        if self.policy is not None:
+            self.replay["policy"] = POL.LearnedExecutor(self.policy, task)
         self.mode, self.authority = "move", "robot"
         self.emit({"t": "decision", "kind": "do", "task": task, "uncertainty": round(u, 2), "sure": T.percent_sure(u),
                    "parts": skill["parts"], "why": why})
@@ -674,7 +678,7 @@ class Sim:
                        "h": pr["size"][2]} for i, pr in enumerate(w.layout.props)],
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
-            "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready()},
+            "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready(), "policy": self.policy is not None},
             "attempt": ((self.replay or {}).get("loop") or {}).get("attempts", 0) + 1 if self.mode == "move" and (self.replay or {}).get("loop") else None,
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,
         })

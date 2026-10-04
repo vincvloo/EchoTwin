@@ -122,3 +122,57 @@ def test_training_reduces_the_loss_and_the_numpy_policy_matches_torch(tmp_path):
     pol = P.ChunkPolicy.load(out)
     pred = pol.predict(obs[3])
     assert abs(pred[0, 0] - act[3, 0]) < 0.15
+
+
+# ---------------- plugging it in ----------------
+def test_waypoint_action_hands_over_to_a_policy():
+    from echotwin.robot.features import prop_skills as PS
+    w = _world()
+    w.settle(20)
+    task = {"object": "prop_0", "name": "cube", "goal": [0.13, 0.0], "h": 0.025, "m": {"width": 0.04, "height": 0.05, "length": 0.05}}
+    chunk = np.zeros((K, 5), np.float32)
+    chunk[:, 0] = 0.1
+    r = {"wps": [], "i": 0, "policy": P.LearnedExecutor(tiny(chunk), task, max_ticks=5)}
+    a = PS.waypoint_action(w, r)
+    assert a is not None and a[0] == pytest.approx(0.1)
+    for _ in range(4):
+        PS.waypoint_action(w, r)
+    assert PS.waypoint_action(w, r) is None
+
+
+def test_skillcheck_runs_a_trial_with_a_policy():
+    from echotwin.robot import skillcheck as S
+    out = S.trial("box", "next to", np.random.default_rng(3), policy=tiny())
+    assert out["ok"] in (True, False) and out["seconds"] > 0
+
+
+def test_pol_from_env(tmp_path):
+    pol = tiny()
+    np.savez(tmp_path / "p.npz", **pol.p)
+    got, note = P.from_env({"POLICY": str(tmp_path / "p.npz")})
+    assert got is not None and "p.npz" in note
+    assert P.from_env({}) == (None, "")
+    none, why = P.from_env({"POLICY": str(tmp_path / "missing.npz")})
+    assert none is None and "could not be loaded" in why
+
+
+def test_the_app_moves_with_the_policy_when_one_is_set(monkeypatch, tmp_path):
+    import echotwin.robot.dataset as DS
+    from echotwin.robot.features import move_things as MT
+    from echotwin.robot.features import prop_skills as PS
+    from echotwin.robot.sim import Sim
+    np.savez(tmp_path / "p.npz", **tiny().p)
+    monkeypatch.setenv("POLICY", str(tmp_path / "p.npz"))
+    (tmp_path / "episodes").mkdir()
+    monkeypatch.setattr(DS.Dataset.__init__, "__defaults__", (tmp_path / "episodes",))
+    s = Sim(lambda m: None)
+    assert s.policy is not None
+    s._rebuild(_world().layout)
+    s.base_layout = s.world.layout.copy()
+    s.world.settle(20)
+    # the policy path replaces the scripted steps when the app starts a move: the replay carries the executor
+    s.skills.demos = [{"grip": 1.0, "lift": 0.05, "drop": 0.004, "speed": 0.2, "dist": 0.15,
+                       "m": {"width": 0.04, "height": 0.05, "length": 0.05, "mass": 0.1}}]
+    text = "put the cube next to the mark"
+    s.handle_prop_task(MT.parse(text, s.world.layout.props), text)
+    assert s.replay is not None and isinstance(s.replay.get("policy"), P.LearnedExecutor) and s.mode == "move"

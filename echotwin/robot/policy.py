@@ -67,6 +67,23 @@ def finish(a: np.ndarray) -> np.ndarray:
     return a
 
 
+def from_env(env=None) -> tuple["ChunkPolicy | None", str]:
+    """The policy named by POLICY in the environment (a path to a trained .npz, relative to the repository), and a sentence about it."""
+    import os
+    env = os.environ if env is None else env
+    name = (env.get("POLICY") or "").strip()
+    if not name:
+        return None, ""
+    path = Path(name)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parents[2] / path
+    try:
+        pol = ChunkPolicy.load(path)
+    except (OSError, KeyError, ValueError) as e:
+        return None, f"POLICY {name} could not be loaded ({e}): using the scripted skill."
+    return pol, f"Moves are made by the learned policy {path.name}."
+
+
 class LearnedExecutor:
     """Drives one move with a policy. `action(world)` has the contract of `prop_skills.waypoint_action`: an action, or None when done."""
 
