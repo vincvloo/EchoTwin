@@ -57,6 +57,18 @@ press stop.
 
 ## Objects on a real table
 
-Without a camera loop the real back-end *believes* where objects are (the twin's contacts predict them). Real objects drift, slip,
-and sit slightly off the scan. Re-detecting the object before the grasp and checking that the gripper closed on something is the
-next step (PR12); the `observer` hook on `RealBackend` is where it plugs in.
+The real back-end *believes* where objects are (the twin's contacts predict them). Real objects drift, slip, and sit slightly off
+the scan, so with `CLOSED_LOOP` on (the default for a real arm) every move looks first, checks as it goes, and retries:
+
+1. The arm parks beside its base, tool high, out of the camera's view of the reachable table.
+2. `observe`: a frame from the camera, a figure-ground search for the object near where it is believed to be
+   (`features/locate.py`: the blob that differs from the table around it), its place on the table through a `PlaneMap`. The
+   twin's belief is moved to what was seen. If the object is not seen the robot says so and stops.
+3. The pick is planned from what was seen. After the grip it checks that the real jaws closed on something (they must stop where
+   the twin's jaws stop on the object; jaws that go further met nothing), after the lift that it is still held, and at the end it looks again.
+4. A failed check opens the jaws, lifts, parks and looks again: at most 2 retries, then it asks to be shown.
+
+What exists for a real camera: `CameraSource(index)` (OpenCV) and `PlaneMap.from_homography(H)`. **What does not:** nothing wires
+them into `backend.make`, and no calibration produces `H` (the marker of PR10 could, with the table frame of the twin: not done). The
+simulation's own camera is the only one tested. Without a camera the real arm still runs the jaw checks and the retries, but "look"
+returns what the twin believes.

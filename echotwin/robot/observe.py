@@ -76,14 +76,15 @@ class CameraObserver:
     def plane(self) -> L.PlaneMap:
         return self._plane() if callable(self._plane) else self._plane
 
-    def observe(self, name: str, expected_xy, size_m: float, z: float) -> np.ndarray | None:
+    def observe(self, name: str, expected_xy, size_m: float, z: float, others=()) -> np.ndarray | None:
         """The table (x, y) of the object seen near `expected_xy`, or None if the camera does not see it there.
-        `size_m`: about how wide it is, `z`: the height of its middle."""
+        `size_m`: about how wide it is, `z`: the height of its middle. `others`: [(x, y, z)] of the other known objects."""
         plane = self.plane
         frame = self.source.frame()
         px = plane.to_pixel(expected_xy, z)
         size_px = plane.metres_to_pixels(size_m, expected_xy, z)
-        f = L.locate(frame, px, size_px, max_area=3.5 * size_px ** 2)      # a blob much bigger than the object is something else (the arm)
+        near = [plane.to_pixel(o[:2], o[2]) for o in others]
+        f = L.locate(frame, px, size_px, max_area=3.5 * size_px ** 2, others=near)      # a blob much bigger than the object is something else (the arm)
         if f is None:
             return None
         return plane.to_table(f.px, z)

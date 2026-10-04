@@ -30,8 +30,10 @@ In this order. Each step is only meaningful once the one before it is solid.
       a real arm (servo driver + the simulation as its twin) both fulfil it, switched by `BACKEND=sim|real`. No arm yet: the real
       back-end is tested on a mock arm and a fake servo bus, and the sim-vs-mock success rate is in `docs/RESULTS.md`.
       Open: the servo driver has never touched hardware (`docs/REAL_ARM.md`).
-- [ ] **PR12 Closed loop.** Re-detect the object before the grasp, check the gripper closed on something, retry.
-      The existing "imagine first, then ask for help" behaviour fits this.
+- [x] **PR12 Closed loop.** Before gripping the robot parks the arm out of the way and looks (a camera frame, the blob that
+      differs from the table near where the object should be), plans again from what it sees, checks that the jaws closed on
+      something, that it lifted, and where it ended up, and retries twice before asking to be shown. On by default for the
+      real arm (`CLOSED_LOOP`). Tested on a render of the simulation and the mock arm; open: a real camera and its calibration.
 - [ ] **PR13 Learning.** Demos are already stored in a LeRobot-style format. Train a policy (for example ACT) on real
       teleoperated demos, with simulated demos as extra data.
 

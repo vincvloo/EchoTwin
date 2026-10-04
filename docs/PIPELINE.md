@@ -11,7 +11,7 @@ One scan goes through these steps. Each step hands one file to the next.
 | 5 | Review: a vision model (NVIDIA) looks at each object in 2 or more photos; a name, shape or removal needs two photos to agree. Without a key: skipped | `perception/review.py`, `scene/review.py` | updated `<stem>_scene.json`, marked photos in `<stem>_scene_review/` |
 | 6 | Scene file: class catalog (shape, movable, surface), support, one file both halves read | `scene/catalog.py`, `scene/schema.py` | `<stem>_scene.json` ([format](../echotwin/scene/schema.md)) |
 | 7 | Twin: pick a table-sized window, build the digital twin (objects to move, fixed obstacles) | `scene/to_twin.py` | twin `.zip` |
-| 8 | Act and learn (on the simulation, or on a real arm with the simulation as its twin): say it and it does it, says it is already done, declines what the arm cannot do, or asks to be shown | `robot/` | demos, skills |
+| 8 | Act and learn (on the simulation, or on a real arm with the simulation as its twin; on a real arm it looks first, checks each step and retries): say it and it does it, says it is already done, declines what the arm cannot do, or asks to be shown | `robot/` | demos, skills |
 
 The review needs `AI_API_KEY` in `.env` (see `THIRD_PARTY.md`: photos are sent to NVIDIA). Without a key the
 detector's names are kept. All capture alternatives are compared in `APPROACHES.md`.

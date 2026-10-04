@@ -143,23 +143,56 @@ simulation (the twin), the mock arm does the move, and the result is judged on t
 | flat | next to | 100 % | 100 % | 0 |
 | flat | to the left | 100 % | 100 % | 0 |
 | flat | on top of | 100 % | 100 % | 0 |
-| box | next to | 100 % | 100 % | 0 |
+| box | next to | 100 % | 92 % | -8 |
 | box | to the left | 100 % | 100 % | 0 |
 | box | on top of | 100 % | 100 % | 0 |
 | cylinder | next to | 83 % | 67 % | -17 |
-| cylinder | to the left | 92 % | 58 % | -33 |
-| cylinder | on top of | 67 % | 25 % | -42 |
+| cylinder | to the left | 92 % | 67 % | -25 |
+| cylinder | on top of | 67 % | 75 % | +8 |
 | ball | next to | 100 % | 100 % | 0 |
 | ball | to the left | 100 % | 100 % | 0 |
-| ball | on top of | 92 % | 92 % | 0 |
-| **all** | | **94 %** | **87 %** | **-8** |
+| ball | on top of | 92 % | 100 % | +8 |
+| **all** | | **94 %** | **92 %** | **-3** |
+
+*Correction (PR12).* PR11 first reported 87 % for the mock arm (cylinder stacking 25 %). That was partly a bug in the real
+back-end: the tool target kept moving while the lagging arm caught up, so after a move was "done" the arm kept sinking and
+pressed the object. PR12 limits how far the target may lead the measured tool (2 cm). The table above is the corrected one.
 
 What this says:
 
-- **The easy objects do not care.** Flat things, boxes and balls hold their success under lag, offsets and heavier objects, because
-  the skills close the loop on the measured tool position and the grasp has some tolerance.
-- **The tall cylinder is where reality bites.** It is gripped low, swings when the arm turns, and heavier plus less grip makes it tip
-  or slide: stacking it drops from 67 % to 25 %. A real arm will probably show the same weak spot first.
-- **This is a stress test, not a prediction.** The mock is as hard as its parameters; real servos, real friction and a real camera
-  will differ. The numbers say which skills to watch first, and give the comparison a place to live: `python -m echotwin.robot.runlog`
-  prints the success rate per back-end from `data/robot/runs.jsonl`, which every executed move appends to.
+- **The mock arm costs little once the controller is right**: 94 % in the simulation, 92 % on the mock arm. The weak spot is the tall
+  cylinder (7 cm wide in 8.2 cm jaws): it needs the tool within about 6 mm sideways, and the mock's encoders are off by about 1 cm.
+- **This is a stress test, not a prediction.** The mock is as hard as its parameters; real servos, friction and a camera will differ.
+  `python -m echotwin.robot.runlog` prints the success rate per back-end from `data/robot/runs.jsonl`.
+
+
+## Does looking again and retrying help? (PR12)
+
+The closed loop (`CLOSED_LOOP=on`): park the arm high and to the side, look (a top-down camera frame, the blob that differs from the
+table near where the object should be), plan the pick from what is seen, then check that the jaws closed on something, that it
+lifted, and where it ended up, with up to two retries. `python -m echotwin.robot.skillcheck --ab [--backend mock] [--disturb before|during]`,
+6 trials per cell, same objects and spots in both columns, judged on the mock arm's own world (not on what the robot believes):
+
+| Situation | open loop | closed loop |
+|---|---|---|
+| Mock arm, nothing disturbed | 100 % | 79 % |
+| Mock arm, object pushed 3 to 6 cm after the plan was made | 10 % | 71 % |
+| Mock arm, object pushed 3 to 6 cm just as the jaws close | 10 % | 43 % |
+| Plain simulation, nothing disturbed | 94 % | 96 % |
+
+What this says:
+
+- **When something changes, the loop is the difference between failing and mostly working.** A pushed object makes the open loop miss
+  (10 %); looking again recovers it to 71 %, and a miss at the last moment is noticed and retried (43 %).
+- **When nothing changes, it costs success on the mock arm (100 % to 79 %).** The causes are known and not all fixed: the camera
+  sometimes does not see a low-contrast object (a pale flat bar, a ball) or an object next to the arm's base and reports "I can't see it",
+  and a check can fire on a grasp that was fine (contacts flicker, a tilted cylinder reads wider), after which the retry disturbs a good
+  position. In the plain simulation, where looking is exact, the loop is neutral (94 % to 96 %).
+- **The tall cylinder is not helped.** Its pick fails because the jaws are 6 mm wider than the object and the arm is about 1 cm off:
+  retrying with the same error lands in the same place. Aligning the tool to the object in the image (visual servoing) would address it
+  and is not done.
+- **So the default is a trade-off.** `CLOSED_LOOP=auto` turns it on for the real and mock arms, where objects can move and the robot
+  only believes where they are; the plain simulation keeps the open loop. If your table is calm and your camera is poor, set `CLOSED_LOOP=off`.
+
+Limits: 6 trials per cell (one failure is 17 points); the camera is a clean render of the simulation without cast shadows; no real
+camera, lighting or calibration was tested.

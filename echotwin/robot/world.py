@@ -281,13 +281,13 @@ class World:
         return True
 
     def observe_pose(self, away_from=None) -> np.ndarray:
-        """Where to hold the tool to look at the table: folded in beside the base, out of the way. With `away_from` (x, y),
-        on the side of the base opposite to that spot, so the arm is not next to what is being looked at."""
+        """Where to hold the tool to look at the table. Folded in just in front of the base; with `away_from` (x, y), held high
+        out to the side of the base opposite to that spot, so the arm does not hide what is looked at or pass low over it."""
         r = self.workspace.r_min + 0.03
         if away_from is None:
             return np.array([self.base[0], self.base[1] + r, 0.06])
-        side = -1.0 if away_from[0] >= self.base[0] else 1.0
-        return np.array([self.base[0] + side * r, self.base[1] + 0.03, 0.06])
+        side = -1.0 if away_from[0] >= self.base[0] else 1.0       # high and to the side: nothing low to sweep through objects
+        return np.array([self.base[0] + side * 0.20, self.base[1] + 0.10, self.carry_height()])
 
     def observe(self, name: str):
         """Look at an object: its table position (x, y), or None when it cannot be seen. The simulation is its own truth."""

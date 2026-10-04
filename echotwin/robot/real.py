@@ -7,9 +7,10 @@ from .drivers import Driver, closure
 from .world import CTRL_DT, World
 
 REAL_SPEED = 0.5            # a real arm moves at half the simulation's tool speed
+MAX_LEAD = 0.02             # the tool target is never more than this far ahead of the measured tool (m)
 SETTLED = 0.02              # the gripper closure changes less than this per tick: it has stopped
 CLOSED_ALL_THE_WAY = 0.95   # a closure above this means the jaws met nothing (or the object slipped out)
-DISAGREE = 0.15             # the real jaws and the twin's jaws are this far apart (fraction of the travel): they do not hold the same thing
+DISAGREE = 0.25             # the real jaws and the twin's jaws are this far apart (fraction of the travel): they do not hold the same thing
 
 
 class TruthObserver:
@@ -84,6 +85,10 @@ class RealBackend:
         self.driver.advance(CTRL_DT)
         self._read()
         tw.hand.q = self.q_meas.copy()                          # the next setpoint starts from where the arm is
+        err = tw.hand.target - self.hand_pos()                  # the arm lags behind its target: do not let the target run away
+        n = float(np.linalg.norm(err))                          # from it (it would keep sinking after the move is "done")
+        if n > MAX_LEAD:
+            tw.hand.target = self.hand_pos() + err * (MAX_LEAD / n)
         tw.advance(tw.data, tw.hand, q=self.q_meas)
         if tw.hand.held and (self.closure > CLOSED_ALL_THE_WAY or abs(self.closure - closure(tw, tw.data)) > DISAGREE):
             tw.hand.held = None          # the twin's jaws stopped on an object; the real jaws did not (they went further): nothing is held
@@ -123,7 +128,10 @@ class RealBackend:
         tw = self.twin
         if self.camera is None:
             return self.obj_pos(name)[:2].copy()
-        est = self.camera.observe(name, tw.obj_pos(name)[:2], 2 * tw.radius(name), tw.half(name))
+        others = [(*tw.obj_pos(n)[:2], tw.half(n)) for n in tw.things() if n != name]
+        hand = self.hand_pos()
+        others += [(tw.base[0], tw.base[1], 0.04), (hand[0], hand[1], hand[2])]      # the arm's base and tool are not objects
+        est = self.camera.observe(name, tw.obj_pos(name)[:2], 2 * tw.radius(name), tw.half(name), others)
         if est is not None and not tw.hand.held:
             tw.set_obj_pose(name, est)
         return est

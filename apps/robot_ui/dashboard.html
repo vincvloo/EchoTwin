@@ -291,7 +291,7 @@ function renderState() {
     $('#armBtn').hidden = s.backend.ready !== false;
   }
   const b = $('#badge');
-  b.textContent = s.halted ? `■ STOPPED (${s.halt_reason})` : s.mode === 'move' ? '● Pip is acting' : s.mode === 'practice' ? '● Practising in the twin' :
+  b.textContent = s.halted ? `■ STOPPED (${s.halt_reason})` : s.mode === 'move' ? ('● Pip is acting' + (s.attempt > 1 ? ` · try ${s.attempt}` : '')) : s.mode === 'practice' ? '● Practising in the twin' :
     s.mode === 'teach' ? (s.recording ? '● Recording your demo' : 'Teach me: your turn') :
     s.mode === 'replay' ? '▶ Replaying your video' : s.mode === 'review' ? `Demo scored ${s.review?.score} · keep?` :
     (s.authority === 'robot' ? 'Pip has control' : 'You have control');

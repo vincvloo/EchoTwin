@@ -118,8 +118,13 @@ def loop_start(world, task: dict, skill: dict, max_attempts: int = MAX_ATTEMPTS)
     """(first steps, loop state) of a move that looks before it grips: park the arm out of the way, then observe.
     Everything after `observe` is planned from what is seen."""
     park = [float(v) for v in world.observe_pose(world.obj_pos(task["object"])[:2])]
-    return [("move", park), ("observe", None)], {"task": task, "skill": skill, "attempts": 0, "max": max_attempts, "park": park,
-                                                  "planned": None, "log": []}
+    lp = {"task": task, "skill": skill, "attempts": 0, "max": max_attempts, "park": park, "planned": None, "log": []}
+    return _park_steps(world, lp) + [("observe", None)], lp
+
+
+def _park_steps(world, lp) -> list:
+    """Go to the parking spot (high, off to the side: see World.observe_pose)."""
+    return [("move", lp["park"])]
 
 
 def _hold(world, r):
@@ -146,7 +151,7 @@ def _retry(world, r, why: str):
     _say(r, f"{why} Trying again ({lp['attempts'] + 1} of {lp['max']}).")
     here = world.hand_pos()
     up = [float(here[0]), float(here[1]), float(world.carry_height())]
-    r["wps"] = r["wps"][:r["i"]] + [("grip", 0.0), ("move", up), ("move", lp["park"]), ("observe", None)]
+    r["wps"] = r["wps"][:r["i"]] + [("grip", 0.0), ("move", up)] + _park_steps(world, lp) + [("observe", None)]
     r["wait"] = r["ticks"] = 0
 
 
@@ -167,33 +172,41 @@ def _observe(world, r):
         _say(r, f"The {name} isn't where I thought. Adjusting.")
     lp["planned"] = np.asarray(seen, float)
     w = waypoints(world, task, lp["skill"], pos=seen)
-    park = ("move", lp["park"])
     r["wps"] = r["wps"][:r["i"]] + [w[0], w[1], w[2], ("check_grasp", None), w[3], ("check_lift", None), w[4], w[5], w[6], w[7],
-                                     park, ("check_goal", None)]
+                                     *_park_steps(world, lp), ("check_goal", None)]
     r["ticks"] = 0                                          # index i now points at the first step planned from what was seen
     return _hold(world, r)
+
+
+CHECK_TICKS = 8           # a grasp may take a few ticks to show in the contacts: look this long before calling it a miss
+GOAL_SETTLE = 20          # let the object stop moving before judging where it ended up
 
 
 def _check(kind, world, r):
     lp = r["loop"]
     me, name = lp["task"]["object"], lp["task"]["name"]
-    if kind == "check_grasp":
-        if world.hand.held != me:
-            _retry(world, r, f"I missed the {name}.")
-        else:
+    r["wait"] = r.get("wait", 0) + 1
+    if kind in ("check_grasp", "check_lift"):
+        lifted = kind == "check_lift" and world.obj_pos(me)[2] > world.half(me) + 0.03     # it is up in the air: carried, whatever the contacts say
+        if world.hand.held == me or lifted:                  # held: on to the next step
             r["i"] += 1
-    elif kind == "check_lift":
-        if world.hand.held != me:
-            _retry(world, r, f"I dropped the {name}.")
-        else:
-            r["i"] += 1
+            r["wait"] = 0
+        elif r["wait"] >= CHECK_TICKS:                       # still not held after looking for a while
+            _retry(world, r, f"I missed the {name}." if kind == "check_grasp" else f"I dropped the {name}.")
     elif kind == "check_goal":
-        world.observe(me)                                    # look once more: where did it end up?
-        if goal_met(world, lp["task"]):
-            _end(r)
-        else:
-            _retry(world, r, f"The {name} isn't where it should be.")
+        if r["wait"] >= GOAL_SETTLE:
+            r["wait"] = 0
+            world.observe(me)                                # look once more: where did it end up?
+            if goal_met(world, lp["task"]) or _near_goal(world, lp["task"]):
+                _end(r)
+            else:
+                _retry(world, r, f"The {name} isn't where it should be.")
     return _hold(world, r)
+
+
+def _near_goal(world, task) -> bool:
+    """Close enough not to disturb it again: within the 6 cm the move is judged by."""
+    return float(np.linalg.norm(world.obj_pos(task["object"])[:2] - np.asarray(task["goal"], float))) < 0.06 and not task.get("stack")
 
 
 def waypoint_action(world: World, r: dict, d=None, hs=None):

@@ -78,9 +78,12 @@ def make_task(w: World, plan: dict, heard: str) -> dict:
     return task
 
 
-def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim") -> dict:
+def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim",
+          loop: bool = False, disturb: str | None = None) -> dict:
     """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill;
-    `backend` is sim (the simulation is the robot) or mock (the mock arm: a perturbed second world, judged by its own objects)."""
+    `backend` is sim (the simulation is the robot) or mock (the mock arm: a perturbed second world, judged by its own objects).
+    `loop`: look before gripping, check, retry (prop_skills.loop_start). `disturb`: push the object 3 to 6 cm, either
+    "before" the move starts (after it was planned) or "during" it (just as the jaws are about to close)."""
     k = _scale()
     probe = None
     try:
@@ -103,32 +106,47 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
             break
     if backend == "mock":                       # the same move, on an arm that is not the simulation
         from .drivers import MockDriver
-        from .real import RealBackend, TruthObserver
+        from .real import RealBackend, mock_camera
         drv = MockDriver(w.layout, w.arm)
-        w = RealBackend(w, drv, observer=TruthObserver(drv.plant))
+        w = RealBackend(w, drv, camera=mock_camera(drv))
         w.settle(10)
+    truth = w.driver.plant if backend == "mock" else w     # what really happened: judged here, not on what the robot believes
     task = make_task(w, plan, f"put the mover {task_name}")
     style = skill_fn(task) if skill_fn else dict(PS.DEFAULTS)
-    wps = PS.waypoints(w, task, style)
-    before = {n: w.obj_pos(n)[:2].copy() for n in w.things()}
-    r = {"wps": wps, "i": 0, "speed": style["speed"]}
+    before = {n: truth.obj_pos(n)[:2].copy() for n in truth.things()}
+    push = None
+    if disturb:                                            # somebody moves it by 3 to 6 cm, towards the middle of the table
+        ang, mag = rng.uniform(0, 2 * np.pi), rng.uniform(0.03, 0.06)
+        push = (mag * np.cos(ang), mag * np.sin(ang))
+    if disturb == "before":
+        truth.nudge("prop_0", push)
+    if loop:
+        wps, lp = PS.loop_start(w, task, style)
+    else:
+        wps, lp = PS.waypoints(w, task, style), None
+    r = {"wps": wps, "i": 0, "speed": style["speed"], "loop": lp}
     if hasattr(w, "grasp_yaw"):
         r["yaw"] = w.grasp_yaw(task["object"])
     ticks = 0
-    limit = MAX_TICKS * (2 if backend == "mock" else 1)       # the real arm moves at half speed
+    limit = MAX_TICKS * (2 if (backend == "mock" or loop) else 1)       # a real arm moves at half speed; looking takes time
+    pushed = disturb != "during"
     while ticks < limit:
+        if not pushed and r["i"] < len(r["wps"]) and r["wps"][r["i"]] == ("grip", 1.0):
+            truth.nudge("prop_0", push)
+            pushed = True
         a = PS.waypoint_action(w, r)
         if a is None:
             break
         w.step(a)
         ticks += 1
     w.settle(25)
-    res = PS.outcome(w, task, before)
-    ok = bool(res["ok"] and PS.goal_met(w, task))
+    res = PS.outcome(truth, task, before)
+    ok = bool(res["ok"] and PS.goal_met(truth, task))
     why = "" if ok else (res["text"] if not res["ok"] else "it did not end where it should")
     if ticks >= limit:
         why, ok = "ran out of time", False
-    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT, "style": style, "task": task}
+    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT, "style": style, "task": task,
+            "attempts": (r.get("loop") or {}).get("attempts"), "log": (r.get("loop") or {}).get("log")}
 
 
 def reason_key(why: str) -> str:
@@ -139,13 +157,13 @@ def reason_key(why: str) -> str:
     return why[:40] or "ok"
 
 
-def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim") -> dict:
+def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None) -> dict:
     rng = np.random.default_rng(seed)
-    out = {"scale": _scale(), "trials": trials, "backend": backend, "cells": {}}
+    out = {"scale": _scale(), "trials": trials, "backend": backend, "loop": loop, "disturb": disturb, "cells": {}}
     for s in shapes:
         for t in tasks:
             t0 = time.time()
-            rs = [trial(s, t, rng, backend=backend) for _ in range(trials)]
+            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb) for _ in range(trials)]
             wins = [r for r in rs if r["ok"]]
             out["cells"][f"{s} | {t}"] = {
                 "success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
@@ -242,9 +260,9 @@ def _can(obj, probe: World) -> bool:
     return World(lay).can_grasp("prop_0")[0]
 
 
-def gap_table(sim: dict, mock: dict) -> str:
-    """Success per cell on the simulation and on the mock arm, side by side."""
-    lines = ["| Shape | Task | sim | mock arm | gap |", "|---|---|---|---|---|"]
+def gap_table(sim: dict, mock: dict, labels=("sim", "mock arm")) -> str:
+    """Success per cell for two runs, side by side."""
+    lines = [f"| Shape | Task | {labels[0]} | {labels[1]} | gap |", "|---|---|---|---|---|"]
     for k, a in sim["cells"].items():
         b = mock["cells"][k]
         s, t = k.split(" | ")
@@ -263,6 +281,10 @@ def main(argv=None):
     ap.add_argument("--out", default="out/skillcheck.json")
     ap.add_argument("--backend", choices=["sim", "mock", "both"], default="sim",
                     help="mock: the mock arm (lag, encoder offsets, heavier objects); both: run each and show the gap")
+    ap.add_argument("--loop", action="store_true", help="look before gripping, check the grasp and the goal, retry (PR12)")
+    ap.add_argument("--ab", action="store_true", help="run open loop and closed loop on the chosen backend and show both")
+    ap.add_argument("--disturb", choices=["before", "during"], default=None,
+                    help="push the object 3 to 6 cm before the move starts, or just as the jaws are about to close")
     ap.add_argument("--transfer", action="store_true", help="do skills learned on some sizes work on other sizes?")
     ap.add_argument("--hard", action="store_true", help="with --transfer: only tall, wide things")
     ap.add_argument("--objects", type=int, default=8, help="with --transfer: objects to practise on")
@@ -280,7 +302,12 @@ def main(argv=None):
         Path("out/skillcheck_backends.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         print("\n" + gap_table(res["sim"], res["mock"]))
         return 0
-    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend)
+    if a.ab:
+        res = {m: run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=(m == "closed"), disturb=a.disturb) for m in ("open", "closed")}
+        Path("out/skillcheck_loop.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+        print("\n" + gap_table(res["open"], res["closed"], ("open loop", "closed loop")))
+        return 0
+    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("\n" + table(res))

@@ -25,9 +25,11 @@ class Found:
     found: bool = True
 
 
-def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH, max_area: float | None = None) -> Found | None:
+def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH, max_area: float | None = None,
+           others=()) -> Found | None:
     """The blob nearest `expected_px` (x, y) that stands out from the table around it, or None.
-    `size_px`: about how wide the object looks, in pixels (sets the window)."""
+    `size_px`: about how wide the object looks, in pixels (sets the window). `others`: where other known objects are expected
+    (x, y): a blob nearer to one of them than to this one is theirs."""
     h, w = bgr.shape[:2]
     r = int(max(2.0 * size_px, 28))
     cx, cy = int(round(expected_px[0])), int(round(expected_px[1]))
@@ -52,6 +54,8 @@ def locate(bgr: np.ndarray, expected_px, size_px: float, thresh: float = THRESH,
         dd = float(np.hypot(cents[i][0] - ex, cents[i][1] - ey))
         if dd > 1.6 * size_px + 8:                              # too far from where it should be: something else
             continue
+        if any(np.hypot(cents[i][0] + x0 - o[0], cents[i][1] + y0 - o[1]) < np.hypot(cents[i][0] - ex, cents[i][1] - ey) for o in others):
+            continue                                            # it belongs to a neighbour
         s = area / (1.0 + (dd / max(size_px, 1.0)) ** 2)        # big and close wins
         if s > score:
             best, score = i, s
