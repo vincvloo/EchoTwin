@@ -81,7 +81,8 @@ class HFDetector:
                 with torch.no_grad(), torch.autocast(self.device, dtype=torch.float16, enabled=self.device == "cuda"):
                     res = self.model(**inputs)
                 side = max(w, h)                                         # OWLv2 pads the image to a square
-                r = self.processor.post_process_object_detection(res, threshold=conf, target_sizes=[(side, side)])[0]
+                post = getattr(self.processor, "post_process_object_detection", None) or self.processor.image_processor.post_process_object_detection
+                r = post(res, threshold=conf, target_sizes=[(side, side)])[0]
                 out += dets_from_scores(r["scores"].tolist(), r["labels"].tolist(), part, conf)
             else:
                 prompt = " . ".join(part) + " ."
