@@ -307,3 +307,36 @@ What this says:
 Limits: the same two scenes and hand-written names as before (a direction, not a leaderboard); one run each, times vary up to 2x; thresholds not
 tuned per model (0.25 for all; OWLv2 and Grounding DINO scores are calibrated differently from YOLO's, so another threshold could shift the
 recall/false trade-off).
+
+## A policy for an arm that is not the simulation: domain randomisation (PR16)
+
+PR13's policy scored 17 to 21 % on the mock arm. The fix tried here is the standard one: make the demonstrations with arms that vary. The scripted
+expert drives the real-arm back-end on a *randomised* mock arm (per episode: lag 0.25 to 0.65, objects 1.0 to 1.8 times heavier, pad friction 0.6 to
+1.0, encoder error 0 to 0.03 rad per joint, encoder noise 0.5 to 3 mrad, half speed), the observations are what that back-end reports, the recorded
+action is the expert's, and only moves that worked on the mock's own objects are kept. Same network and training as PR13, 600 demos each, 12 trials per
+cell, same objects and spots. Three arms to test on: the simulation; the default mock arm (lag 0.45, objects 1.4 times heavier, friction 0.8, encoder
+error 0.012); and a **harder, held-out mock arm outside every training range** (lag 0.2, objects 1.8 times heavier, friction 0.6, encoder error 0.04).
+
+| Policy trained on | Simulation | Default mock arm | Held-out hard arm |
+|---|---|---|---|
+| perfect simulated arm (PR13) | 73 % | 18 % | 14 % |
+| randomised mock arms | 72 % | **64 %** | **59 %** |
+| half simulation, half randomised mock arms | 68 % | 62 % | 51 % |
+| *the scripted skill, for reference* | 94 % | 92 % | 65 % |
+
+Per task, randomised-mock policy on the default mock arm (next to / to the left / on top of): flat 58 / 75 / 58 %, box 92 / 92 / 92 %, cylinder 0 / 8 / 0 %,
+ball 92 / 100 / 100 %.
+
+What this says:
+
+- **Randomising the arm in the data closes most of the gap.** The same network goes from 18 % to 64 % on the default mock arm and from 14 % to 59 % on an
+  arm it never saw, and loses nothing on the simulation (72 % against 73 %). On the hard arm it is within 6 points of the scripted skill (65 %),
+  which itself falls from 92 % to 65 % there: the hard arm is hard for everyone.
+- **Mixing in perfect-arm demos did not help** (62 % and 51 % against 64 % and 59 %): the cheap data dilutes the data that matters.
+- **The boxes and the balls are nearly solved** (92 to 100 %), the flat bar is the middle (33 to 75 %), the **tall cylinder stays at 0 to 8 %**:
+  6 mm of clearance and about a centimetre of arm error are beyond what a policy that only sees the arm's own readings can do (see PR14 for looking at the gripper).
+- **What it is not:** a result on hardware. The held-out arm is the same kind of simulation as the training arms, with different numbers. A policy that
+  survives it is more robust to lag, offsets and weight, not proven on a real arm, a real camera or real friction.
+
+Limits: one training run per row (no seeds averaged), 12 trials per cell (one failure is 8 points), 600 demos each; the demos are still from one scripted
+teacher, so the policy can only approach it.
