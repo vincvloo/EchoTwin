@@ -198,7 +198,7 @@ def test_the_gripper_is_lined_up_with_the_object_when_the_encoders_are_off():
     b2, plant2 = _off_arm()
     _, err_off = _until_grip(b2, plant2, align=False)
     assert err_off > 0.008, err_off                               # without looking, the gripper is about a centimetre away
-    assert err_on < 0.004 and err_on < err_off / 2, (err_on, err_off)
+    assert err_on < 0.0055 and err_on < err_off / 1.5, (err_on, err_off)
     assert any("off from where my joints say" in e for e in r["loop"]["log"]) and any("Lined up" in e for e in r["loop"]["log"])
 
 

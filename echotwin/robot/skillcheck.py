@@ -79,7 +79,7 @@ def make_task(w: World, plan: dict, heard: str) -> dict:
 
 
 def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim",
-          loop: bool = False, disturb: str | None = None, policy=None) -> dict:
+          loop: bool = False, disturb: str | None = None, policy=None, align: bool | None = None, encoder_offset: float | None = None) -> dict:
     """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill;
     `backend` is sim (the simulation is the robot) or mock (the mock arm: a perturbed second world, judged by its own objects).
     `loop`: look before gripping, check, retry (prop_skills.loop_start). `disturb`: push the object 3 to 6 cm, either
@@ -107,7 +107,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     if backend == "mock":                       # the same move, on an arm that is not the simulation
         from .drivers import MockDriver
         from .real import RealBackend, mock_camera
-        drv = MockDriver(w.layout, w.arm)
+        drv = MockDriver(w.layout, w.arm, **({"encoder_offset": encoder_offset} if encoder_offset is not None else {}))
         w = RealBackend(w, drv, camera=mock_camera(drv))
         w.settle(10)
     truth = w.driver.plant if backend == "mock" else w     # what really happened: judged here, not on what the robot believes
@@ -121,7 +121,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     if disturb == "before":
         truth.nudge("prop_0", push)
     if loop:
-        wps, lp = PS.loop_start(w, task, style)
+        wps, lp = PS.loop_start(w, task, style, align=align)
     else:
         wps, lp = PS.waypoints(w, task, style), None
     r = {"wps": wps, "i": 0, "speed": style["speed"], "loop": lp}
@@ -160,13 +160,15 @@ def reason_key(why: str) -> str:
     return why[:40] or "ok"
 
 
-def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None, policy=None) -> dict:
+def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None, policy=None,
+        align: bool | None = None, encoder_offset: float | None = None) -> dict:
     rng = np.random.default_rng(seed)
     out = {"scale": _scale(), "trials": trials, "backend": backend, "loop": loop, "disturb": disturb, "cells": {}}
     for s in shapes:
         for t in tasks:
             t0 = time.time()
-            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb, policy=policy) for _ in range(trials)]
+            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb, policy=policy, align=align, encoder_offset=encoder_offset)
+                  for _ in range(trials)]
             wins = [r for r in rs if r["ok"]]
             out["cells"][f"{s} | {t}"] = {
                 "success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
@@ -284,6 +286,9 @@ def main(argv=None):
     ap.add_argument("--out", default="out/skillcheck.json")
     ap.add_argument("--backend", choices=["sim", "mock", "both"], default="sim",
                     help="mock: the mock arm (lag, encoder offsets, heavier objects); both: run each and show the gap")
+    ap.add_argument("--align", choices=["on", "off"], default=None, help="with --loop: look at the gripper and line it up before going down (default: auto)")
+    ap.add_argument("--ab-align", action="store_true", help="run the closed loop without and with the alignment and show both (mock arm)")
+    ap.add_argument("--encoder-offset", type=float, default=None, help="mock arm: spread of the encoder error per joint, rad (default 0.012)")
     ap.add_argument("--policy", metavar="NPZ", help="move with this trained policy (train_policy.py) instead of the scripted skill")
     ap.add_argument("--loop", action="store_true", help="look before gripping, check the grasp and the goal, retry (PR12)")
     ap.add_argument("--ab", action="store_true", help="run open loop and closed loop on the chosen backend and show both")
@@ -306,6 +311,12 @@ def main(argv=None):
         Path("out/skillcheck_backends.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
         print("\n" + gap_table(res["sim"], res["mock"]))
         return 0
+    if a.ab_align:
+        res = {m: run(a.trials, a.shapes, a.tasks, a.seed, "mock", loop=True, disturb=a.disturb, align=(m == "aligned"),
+                      encoder_offset=a.encoder_offset) for m in ("plain", "aligned")}
+        Path("out/skillcheck_align.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
+        print(chr(10) + gap_table(res["plain"], res["aligned"], ("closed loop", "+ align")))
+        return 0
     if a.ab:
         res = {m: run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=(m == "closed"), disturb=a.disturb) for m in ("open", "closed")}
         Path("out/skillcheck_loop.json").write_text(json.dumps(res, indent=1), encoding="utf-8")
@@ -315,7 +326,8 @@ def main(argv=None):
     if a.policy:
         from .policy import ChunkPolicy
         pol = ChunkPolicy.load(a.policy)
-    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb, policy=pol)
+    res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb, policy=pol,
+              align=None if a.align is None else a.align == "on", encoder_offset=a.encoder_offset)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("\n" + table(res))
