@@ -26,6 +26,8 @@ def _mentions(text: str, props: list[dict]) -> list[tuple[int, int]]:
         if 1 <= k <= len(props):
             out.append((m.start(), k - 1))
     for i, pr in enumerate(props):
+        if re.fullmatch(r"(?:object|number|thing|item) \d+", _norm(pr["name"])):
+            continue                                    # "object 2" is found by its number above, not by the word "object"
         words = [w for w in _norm(pr["name"]).split() if w not in STOP and len(w) >= 3]
         pos = [m.start() for w in words for m in re.finditer(rf"\b{re.escape(w)}s?\b", t)]
         if pos:
