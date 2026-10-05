@@ -99,6 +99,8 @@ Ask it:
 - **"What have you learned?"** for the sizes of objects it knows.
 - **"Why did you stop?"** after you pressed stop.
 
+Your demos can also train a neural policy (`docs/LEARNING.md`).
+
 Demos are saved as JSON files in `data/robot/episodes/`, with the instruction, the state at every step (hand,
 grip, object, goal) and the actions. `python -m echotwin.robot.reset` deletes them.
 

@@ -196,3 +196,40 @@ What this says:
 
 Limits: 6 trials per cell (one failure is 17 points); the camera is a clean render of the simulation without cast shadows; no real
 camera, lighting or calibration was tested.
+
+## Can a network learn the move from demonstrations? (PR13)
+
+A small network (3 layers of 512, state in, a chunk of the next 10 actions out, temporal ensembling: `docs/LEARNING.md`) was trained
+by behaviour cloning on moves made by the scripted skill in the simulation, then asked to do the same 12 tasks as `skillcheck`
+(12 trials per cell, the same objects and spots in every row). Training takes about a minute on the laptop GPU. The "demos" are
+whole moves that worked; the scripted skill is the teacher.
+
+| Moves by | Demos | Simulation | Mock arm |
+|---|---|---|---|
+| scripted skill (the teacher) | - | **94 %** | 92 % |
+| learned policy | 600 | 73 % | 17 % |
+| learned policy | 200 | 47 % | |
+| learned policy | 50 | 25 % | |
+| learned policy, demos made with noise on the executed motion (DART) | 600 / 200 / 50 | 62 % / 35 % / 31 % | 21 % (600) |
+
+Per task, 600 demos without noise (simulation): flat 83 / 92 / 67 %, box 92 / 83 / 100 %, cylinder 42 / 42 / 8 %, ball 100 / 92 / 75 %
+(next to / to the left / on top of).
+
+What this says:
+
+- **It works, and it is data hungry.** From 25 % at 50 demos to 73 % at 600, still climbing. It picks, carries and puts down objects it
+  was never shown at that spot. It does not reach its teacher (94 %) and has no reason to exceed it.
+- **The tall cylinder is the failure** (8 to 42 %): millimetre tolerances, and the teacher itself only manages 67 to 92 % there.
+- **Noise in the demos did not help here.** With 600 demos the noisy set scored 62 % against 73 % for the clean one (200 demos: 35 % against 47 %;
+  50 demos: 31 % against 25 %). A sensible guess is that 3 cm/s of noise blurs the last centimetres, where the grasp is decided.
+  So `demos.py` makes clean demos unless asked.
+- **It does not carry over to the mock arm** (17 to 21 %, against 92 % for the scripted skill). The scripted skill closes the loop on the
+  measured tool position with a stiff proportional rule; the network was trained on a perfect, fast simulated arm and has never seen lag,
+  encoder offsets or half speed. This is the same lesson as for any sim-to-real policy: the data has to include the real arm (or be randomised to cover it).
+- **Two things made the difference between 1 % and 64 % on the way**, and are worth knowing: giving the network the offsets between the tool,
+  the object and the goal (it cannot learn "difference" from a few hundred layouts), and demos with objects turned both ways (every early
+  demo had the jaws at the same angle, so an object needing the other angle sent the input off the scale). A heavier weight on the grip output
+  helped it let go of the object.
+
+Limits: simulated demos from one scripted teacher, no images, no real robot, 12 trials per cell (one failure is 8 points), one training run
+per row (no seeds averaged).

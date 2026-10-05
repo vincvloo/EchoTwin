@@ -34,8 +34,11 @@ In this order. Each step is only meaningful once the one before it is solid.
       differs from the table near where the object should be), plans again from what it sees, checks that the jaws closed on
       something, that it lifted, and where it ended up, and retries twice before asking to be shown. On by default for the
       real arm (`CLOSED_LOOP`). Tested on a render of the simulation and the mock arm; open: a real camera and its calibration.
-- [ ] **PR13 Learning.** Demos are already stored in a LeRobot-style format. Train a policy (for example ACT) on real
-      teleoperated demos, with simulated demos as extra data.
+- [x] **PR13 Learning.** A chunk policy (state in, the next 10 actions out, temporal ensembling; torch to train, numpy to run) learns the
+      move by behaviour cloning of simulated demos and your own recorded ones (`docs/LEARNING.md`). Result (`docs/RESULTS.md`): 73 % of
+      the 12 tasks with 600 demos against 94 % for the scripted skill, and about 20 % on the mock arm. Open: images, real teleoperated
+      demos, randomising the simulation so it carries to an arm that lags, ACT proper (LeRobot). The demo files only use LeRobot's
+      field names; they are not a LeRobot dataset and no export exists.
 
 ## Open, not scheduled
 - [ ] A non-YOLO detector (OWLv2, Grounding DINO: permissive licences, would also remove the AGPL dependency); small
