@@ -23,6 +23,7 @@ from .scene import Layout
 from .world import World
 
 MAX_TICKS = 1500
+MOCK_TICKS = 3000          # the real back-end moves at half speed
 
 
 def _setup(rng):
@@ -51,18 +52,29 @@ def _setup(rng):
     return None
 
 
-def one_episode(rng, noise: float = 0.0, style: dict | None = None):
-    """Run the scripted skill once. Returns (obs (N, 18), actions (N, 5), ok, task) with the clean expert actions recorded."""
+def one_episode(rng, noise: float = 0.0, style: dict | None = None, backend: str = "sim"):
+    """Run the scripted skill once. Returns (obs (N, 18), actions (N, 5), ok, task) with the clean expert actions recorded.
+
+    backend "mock": the expert drives a real-arm back-end on a randomised mock arm (lag, encoder offsets, weight, friction: see
+    `MockDriver.randomized`), the observations are what that back-end reports, and the move counts only if the mock's own objects ended up right."""
     from . import skillcheck as S
     got = _setup(rng)
     if got is None:
         return None
     w, task = got
+    truth, limit = w, MAX_TICKS
+    if backend == "mock":
+        from .drivers import MockDriver
+        from .real import RealBackend, mock_camera
+        drv = MockDriver.randomized(w.layout, w.arm, rng)
+        w = RealBackend(w, drv, camera=mock_camera(drv))
+        w.settle(10)
+        truth, limit = drv.plant, MOCK_TICKS
     style = style or (dict(PS.DEFAULTS) if rng.random() < 0.5 else S.random_style(rng))
     r = {"wps": PS.waypoints(w, task, style), "i": 0, "speed": style["speed"], "loop": None, "yaw": w.grasp_yaw(task["object"])}
-    before = {n: w.obj_pos(n)[:2].copy() for n in w.things()}
+    before = {n: truth.obj_pos(n)[:2].copy() for n in truth.things()}
     obs, acts = [], []
-    for t in range(MAX_TICKS):
+    for t in range(limit):
         a = PS.waypoint_action(w, r)
         if a is None:
             break
@@ -74,13 +86,13 @@ def one_episode(rng, noise: float = 0.0, style: dict | None = None):
             run[:3] += rng.normal(0.0, noise * 0.1, 3)         # m/s: the executed motion is a little off, the label is not
         w.step(run)
     w.settle(25)
-    res = PS.outcome(w, task, before)
-    ok = bool(res["ok"] and PS.goal_met(w, task)) and len(obs) < MAX_TICKS
+    res = PS.outcome(truth, task, before)
+    ok = bool(res["ok"] and PS.goal_met(truth, task)) and len(obs) < limit
     return np.stack(obs), np.stack(acts), ok, task
 
 
-def collect(n: int, out: Path, noise: float = 0.0, seed: int = 0, shard: int = 100, log=print) -> dict:
-    """Make `n` successful episodes in shards of `shard` episodes."""
+def collect(n: int, out: Path, noise: float = 0.0, seed: int = 0, shard: int = 100, log=print, backend: str = "sim") -> dict:
+    """Make `n` successful episodes in shards of `shard` episodes. backend: sim, mock (randomised mock arm) or mix (every other one)."""
     out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
     buf, kept, tried, t0, shards = [], 0, 0, time.time(), 0
@@ -90,12 +102,12 @@ def collect(n: int, out: Path, noise: float = 0.0, seed: int = 0, shard: int = 1
         if not buf:
             return
         O_, A_, E_ = (np.concatenate([b[i] for b in buf]) for i in range(3))
-        np.savez_compressed(out / f"shard_{shards:04d}.npz", obs=O_, act=A_, episode=E_, source=np.array(["sim"]))
+        np.savez_compressed(out / f"shard_{shards:04d}.npz", obs=O_, act=A_, episode=E_, source=np.array([backend if backend != "mix" else "sim"]))
         shards += 1
         buf = []
     while kept < n and tried < 6 * n + 20:
         tried += 1
-        got = one_episode(rng, noise)
+        got = one_episode(rng, noise, backend=("mock" if (backend == "mix" and tried % 2) else "sim" if backend == "mix" else backend))
         if got is None or not got[2]:
             continue
         o, a, _, _ = got
@@ -135,6 +147,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--n", type=int, default=0, help="episodes to make with the scripted skill")
     ap.add_argument("--noise", type=float, default=0.0, help="noise on the executed motion, 0 to 1 (0.3 = 3 cm/s)")
+    ap.add_argument("--backend", choices=["sim", "mock", "mix"], default="sim",
+                    help="mock: the expert drives a randomised mock arm (lag, encoder offsets, weight, friction); mix: half and half")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--episodes", help="convert the JSON demos in this folder instead")
     ap.add_argument("--out", required=True)
@@ -142,7 +156,7 @@ def main(argv=None) -> int:
     if a.episodes:
         print(convert(Path(a.episodes), Path(a.out)))
     elif a.n:
-        print(collect(a.n, Path(a.out), a.noise, a.seed))
+        print(collect(a.n, Path(a.out), a.noise, a.seed, backend=a.backend))
     else:
         ap.print_help()
     return 0

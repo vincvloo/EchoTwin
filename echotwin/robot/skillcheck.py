@@ -60,7 +60,7 @@ def _spawn(rng, w_probe: World | None, k: float):
 
 
 def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim",
-          loop: bool = False, disturb: str | None = None, policy=None, align: bool | None = None, encoder_offset: float | None = None) -> dict:
+          loop: bool = False, disturb: str | None = None, policy=None, align: bool | None = None, encoder_offset: float | None = None, mock: dict | None = None) -> dict:
     """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill;
     `backend` is sim (the simulation is the robot) or mock (the mock arm: a perturbed second world, judged by its own objects).
     `loop`: look before gripping, check, retry (prop_skills.loop_start). `disturb`: push the object 3 to 6 cm, either
@@ -88,7 +88,10 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     if backend == "mock":                       # the same move, on an arm that is not the simulation
         from .drivers import MockDriver
         from .real import RealBackend, mock_camera
-        drv = MockDriver(w.layout, w.arm, **({"encoder_offset": encoder_offset} if encoder_offset is not None else {}))
+        kw = {k: v for k, v in (mock or {}).items() if v is not None}                   # lag, mass_scale, friction_scale of this arm
+        if encoder_offset is not None:
+            kw["encoder_offset"] = encoder_offset
+        drv = MockDriver(w.layout, w.arm, **kw)
         w = RealBackend(w, drv, camera=mock_camera(drv))
         w.settle(10)
     truth = w.driver.plant if backend == "mock" else w     # what really happened: judged here, not on what the robot believes
@@ -108,7 +111,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     r = {"wps": wps, "i": 0, "speed": style["speed"], "loop": lp}
     if policy is not None:                                  # a learned policy instead of the scripted steps
         from .policy import LearnedExecutor
-        r["policy"] = LearnedExecutor(policy, task)
+        r["policy"] = LearnedExecutor(policy, task, world=w)
     if hasattr(w, "grasp_yaw"):
         r["yaw"] = w.grasp_yaw(task["object"])
     ticks = 0
@@ -142,13 +145,13 @@ def reason_key(why: str) -> str:
 
 
 def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None, policy=None,
-        align: bool | None = None, encoder_offset: float | None = None) -> dict:
+        align: bool | None = None, encoder_offset: float | None = None, mock: dict | None = None) -> dict:
     rng = np.random.default_rng(seed)
     out = {"scale": _scale(), "trials": trials, "backend": backend, "loop": loop, "disturb": disturb, "cells": {}}
     for s in shapes:
         for t in tasks:
             t0 = time.time()
-            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb, policy=policy, align=align, encoder_offset=encoder_offset)
+            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb, policy=policy, align=align, encoder_offset=encoder_offset, mock=mock)
                   for _ in range(trials)]
             wins = [r for r in rs if r["ok"]]
             out["cells"][f"{s} | {t}"] = {
@@ -270,6 +273,9 @@ def main(argv=None):
     ap.add_argument("--align", choices=["on", "off"], default=None, help="with --loop: look at the gripper and line it up before going down (default: auto)")
     ap.add_argument("--ab-align", action="store_true", help="run the closed loop without and with the alignment and show both (mock arm)")
     ap.add_argument("--encoder-offset", type=float, default=None, help="mock arm: spread of the encoder error per joint, rad (default 0.012)")
+    ap.add_argument("--mock-lag", type=float, default=None, help="mock arm: share of the gap it closes per tick (default 0.45)")
+    ap.add_argument("--mock-mass", type=float, default=None, help="mock arm: how much heavier the objects are (default 1.4)")
+    ap.add_argument("--mock-friction", type=float, default=None, help="mock arm: pad friction relative to the simulation (default 0.8)")
     ap.add_argument("--policy", metavar="NPZ", help="move with this trained policy (train_policy.py) instead of the scripted skill")
     ap.add_argument("--loop", action="store_true", help="look before gripping, check the grasp and the goal, retry (PR12)")
     ap.add_argument("--ab", action="store_true", help="run open loop and closed loop on the chosen backend and show both")
@@ -308,7 +314,8 @@ def main(argv=None):
         from .policy import ChunkPolicy
         pol = ChunkPolicy.load(a.policy)
     res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb, policy=pol,
-              align=None if a.align is None else a.align == "on", encoder_offset=a.encoder_offset)
+              align=None if a.align is None else a.align == "on", encoder_offset=a.encoder_offset,
+              mock={"lag": a.mock_lag, "mass_scale": a.mock_mass, "friction_scale": a.mock_friction})
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("\n" + table(res))

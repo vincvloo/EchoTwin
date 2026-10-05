@@ -73,25 +73,29 @@ def score_scene(scene: dict, detections: dict[str, list[tuple[str, float]]], con
 def summarize(results: dict[str, dict]) -> str:
     """{model: {"scenes": {scene: metrics}, "ms": ..., "gpu_mb": ...}} -> a Markdown table."""
     scenes = sorted({s for r in results.values() for s in r["scenes"]})
-    head = "| Model | " + " | ".join(f"{s}: recall, false" for s in scenes) + " | ms / photo | GPU MB |"
-    lines = [head, "|" + "---|" * (len(scenes) + 3)]
+    head = "| Model | " + " | ".join(f"{s}: recall, false" for s in scenes) + " | ms / photo | GPU MB | licence |"
+    lines = [head, "|" + "---|" * (len(scenes) + 4)]
     for model, r in results.items():
         cells = [f"{r['scenes'][s]['recall']:.0%}, {r['scenes'][s]['false_rate']:.0%}" if s in r["scenes"] else "-"
                  for s in scenes]
-        lines.append(f"| {model} | " + " | ".join(cells) + f" | {r['ms']:.0f} | {r['gpu_mb']:.0f} |")
+        lines.append(f"| {model} | " + " | ".join(cells) + f" | {r['ms']:.0f} | {r['gpu_mb']:.0f} | {r.get('licence', '')} |")
     return "\n".join(lines)
 
 
 # ---------------- models ----------------
 class Detector:
-    """One detector. predict(path) -> [(name, confidence)]."""
+    """One detector. predict(path) -> [(name, confidence)]. Ultralytics models (YOLO, YOLOE) or the Hugging Face ones (OWLv2, Grounding DINO)."""
 
     def __init__(self, spec: str, download: bool = False, device: str | None = None):
         self.spec = spec
         self.model = detectors.load(spec, download=download)
         self.device = device
+        self.licence = detectors.licence(spec)
+        self.boxes_only = not hasattr(self.model, "predict") or type(self.model).__name__ == "HFDetector"
 
     def predict(self, img_path: Path, conf: float, imgsz: int = 640) -> list[tuple[str, float]]:
+        if self.boxes_only:
+            return self.model.predict(img_path, conf)
         res = self.model.predict(str(img_path), conf=conf, imgsz=imgsz, retina_masks=True, verbose=False,
                                  device=self.device)[0]
         if res.boxes is None:
@@ -106,7 +110,7 @@ def run_model(spec: str, cfg: dict, conf: float, download: bool, scenes: list[st
     if cuda:
         torch.cuda.reset_peak_memory_stats()
     det = Detector(spec, download)
-    out = {"scenes": {}, "ms": 0.0, "gpu_mb": 0.0}
+    out = {"scenes": {}, "ms": 0.0, "gpu_mb": 0.0, "licence": det.licence, "boxes_only": det.boxes_only}
     times = []
     first = True
     for sname in scenes:

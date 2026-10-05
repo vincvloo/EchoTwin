@@ -82,3 +82,49 @@ def test_featurize_adds_the_offsets_the_network_needs():
     assert np.allclose(f[18:21], [0.3, 0.3, 0.3]) and np.allclose(f[21:23], [0.6, 0.6]) and np.allclose(f[23:25], [0.3, 0.3])
     assert f[25] == pytest.approx(0.6)
     assert O.featurize(np.stack([obs, obs])).shape == (2, O.FEAT_DIM)
+
+
+# ---------------- demos from a randomised arm ----------------
+def test_randomised_mock_arms_stay_in_range_and_differ():
+    from echotwin.robot.drivers import MockDriver
+    from echotwin.robot.scene import Layout
+    rng = np.random.default_rng(0)
+    arms = [MockDriver.randomized(Layout(), None, rng) for _ in range(6)]
+    for a in arms:
+        lo, hi = MockDriver.RANGES["lag"]
+        assert lo <= a.lag <= hi and 1.0 <= a.mass_scale <= 1.8 and 0.6 <= a.friction_scale <= 1.0
+    assert len({round(a.lag, 4) for a in arms}) == 6 and len({tuple(np.round(a.offset, 4)) for a in arms}) == 6
+    wide = MockDriver.randomized(Layout(), None, np.random.default_rng(1), scale=3.0)
+    assert wide.lag > 0                                                 # widening never goes below zero
+
+
+def test_a_mock_episode_records_the_measured_state_and_the_experts_action(tmp_path):
+    rng = np.random.default_rng(3)
+    for _ in range(8):
+        got = DM.one_episode(rng, backend="mock")
+        if got is not None and got[2]:
+            break
+    obs, acts, ok, task = got
+    assert ok and obs.shape[1] == O.OBS_DIM and acts.shape[1] == O.ACT_DIM
+    assert len(obs) > 150                                               # half speed: the move takes longer than in the simulation
+    assert set(np.unique(acts[:, 3])) <= {0.0, 1.0} and np.abs(acts[:, :3]).max() <= 0.2501
+
+
+def test_the_collector_can_make_mock_and_mixed_sets(tmp_path):
+    info = DM.collect(2, tmp_path / "m", seed=2, shard=2, log=lambda *_: None, backend="mock")
+    assert info["episodes"] == 2 and np.load(tmp_path / "m" / "shard_0000.npz")["source"][0] == "mock"
+    info2 = DM.collect(2, tmp_path / "x", seed=2, shard=2, log=lambda *_: None, backend="mix")
+    assert info2["episodes"] == 2
+
+
+def test_the_executor_gets_more_time_on_a_half_speed_arm():
+    from echotwin.robot import drivers as D
+    from echotwin.robot import policy as P
+    from echotwin.robot import real as R
+    w = _world()
+    twin = World(w.layout)
+    r = R.RealBackend(twin, D.MockDriver(twin.layout, twin.arm))
+    task = {"object": "prop_0", "goal": [0.1, 0.0], "m": {"width": 0.04, "height": 0.05, "length": 0.05}}
+    dummy = type("Pol", (), {"reset": lambda self: None})()
+    assert P.LearnedExecutor(dummy, task, world=w).max_ticks == P.MAX_TICKS
+    assert P.LearnedExecutor(dummy, task, world=r).max_ticks == 2 * P.MAX_TICKS

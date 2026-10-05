@@ -37,7 +37,7 @@ In this order. Each step is only meaningful once the one before it is solid.
 - [x] **PR13 Learning.** A chunk policy (state in, the next 10 actions out, temporal ensembling; torch to train, numpy to run) learns the
       move by behaviour cloning of simulated demos and your own recorded ones (`docs/LEARNING.md`). Result (`docs/RESULTS.md`): 73 % of
       the 12 tasks with 600 demos against 94 % for the scripted skill, and about 20 % on the mock arm. Open: images, real teleoperated
-      demos, randomising the simulation so it carries to an arm that lags, ACT proper (LeRobot). The demo files only use LeRobot's
+      demos, ACT proper (LeRobot). (Randomising the arm in the demos, PR16, took the mock-arm score from 18 % to 64 %.) The demo files only use LeRobot's
       field names; they are not a LeRobot dataset and no export exists.
 
 - [x] **PR14 Visual servoing.** The robot can look at its own gripper (`find_pads`, `ALIGN=on`) and line it up with the object before
@@ -45,6 +45,7 @@ In this order. Each step is only meaningful once the one before it is solid.
       arm is badly off, so it is off by default. Open: a better measurement of the tool (a mark on the hand, a side view).
 
 ## Open, not scheduled
-- [ ] A non-YOLO detector (OWLv2, Grounding DINO: permissive licences, would also remove the AGPL dependency); small
+- [x] A non-YOLO detector test (OWLv2, Grounding DINO: Apache-2.0): neither beats YOLOE with the public vocabulary and both are slower
+      (`docs/RESULTS.md`). Open: a mask source (box as mask, or SAM) if the AGPL dependency must go; small
       tabletop objects are still named wrongly by every detector tested (`docs/RESULTS.md`).
-- [ ] The MobileCLIP2 text encoder licence (Apple) should be checked before any commercial use.
+- [x] The MobileCLIP2 text encoder licence (Apple) was checked: research and non-commercial only (`THIRD_PARTY.md`). A commercial build needs another text-capable detector (OWLv2 is Apache-2.0, slower and less accurate) or a closed-set model.

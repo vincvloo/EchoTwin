@@ -47,7 +47,7 @@ What this says:
 
 Limits of the benchmark: two scenes, scene-level scoring, expected names written by hand (read them), and four
 small objects on the table. Treat it as a direction, not a leaderboard. Models outside the Ultralytics family (for
-example OWLv2 or Grounding DINO, which have permissive licences) were not tested.
+example OWLv2 or Grounding DINO, which have permissive licences) were not tested here; see the next section.
 
 Use your own words: put one name per line in a text file and set `DETECT_PROMPTS=my_words.txt` in `.env`, or try it
 first with `bench_detect ... yoloe-26s-seg.pt:text=my_words.txt`.
@@ -266,3 +266,77 @@ What this says:
   "corrected" 4 cm of travel (success fell from 79 % to 49 %); it took dark blue boxes for pads; and it aligned objects that fit loosely.
 
 Limits: one camera model (a clean render), the jaws of the built-in arm, the mock arm's encoder error as a random offset per joint.
+
+## Detectors that are not YOLO: OWLv2 and Grounding DINO (PR15)
+
+Both are Apache-2.0 (YOLOE is AGPL-3.0), so a detector as good as YOLOE would remove the AGPL dependency from the detection step. Same
+benchmark, same photos and scoring as above, same session, `transformers` 5.18, RTX 2050 (4 GB). OWLv2 is `google/owlv2-base-patch16-ensemble`
+(fp16 on the GPU, 960 px), Grounding DINO is `IDEA-Research/grounding-dino-tiny` (fp32). Command:
+`python -m echotwin.perception.bench_detect owlv2:text=objects365 gdino-tiny:text=objects365 yoloe-26s-seg.pt:text=objects365`.
+Recall, false rate, with the public Objects365 vocabulary (365 names), threshold 0.25:
+
+| Model | Lounge | Table | ms / photo | GPU MB | Licence |
+|---|---|---|---|---|---|
+| yoloe-26s-seg, text=objects365 (the default) | 83 %, 8 % | 50 %, 45 % | 67 | 325 | AGPL-3.0 |
+| OWLv2 | 75 %, 14 % | 50 %, 58 % | 612 | 995 | Apache-2.0 |
+| Grounding DINO tiny | 83 %, 16 % | 50 %, 78 % | 9 875 | 2 142 | Apache-2.0 |
+
+With our own 65-word list (written after seeing these photos, so partly fitted) and with COCO's 80 names:
+
+| Model, vocabulary | Lounge | Table | ms / photo |
+|---|---|---|---|
+| OWLv2, catalog | 100 %, 6 % | 50 %, 35 % | 586 |
+| Grounding DINO tiny, catalog | 92 %, 19 % | 100 %, 62 % | 2 081 |
+| OWLv2, COCO | 33 %, 5 % | 25 %, 48 % | 568 |
+| Grounding DINO tiny, COCO | 50 %, 12 % | 25 %, 63 % | 2 130 |
+
+What this says:
+
+- **Neither is better than YOLOE with a fair vocabulary.** With the public list OWLv2 finds fewer lounge objects (75 % against 83 %) and names
+  more things wrongly (58 % against 45 % on the table); Grounding DINO matches the recall and is the least accurate (78 % false on the table).
+- **They are much slower.** OWLv2 takes about 0.6 s per photo (9 times YOLOE) and 1 GB; Grounding DINO about 10 s per photo with 365 names
+  (it reads only about 40 names at a time, so the list is asked in 10 chunks) and 2.1 GB. For 12 photos that is 7 s against 120 s.
+- **The small table objects are not solved by any model**, again: the chocolate bar and the earbud case are missed with the public vocabulary
+  by all three. Only Grounding DINO with our fitted list finds all four table objects, at a 62 % false rate.
+- **OWLv2 with our 65-word list is the best lounge result so far** (100 %, 6 % false), but that list was written after seeing the photos.
+  It is a measure of what a good vocabulary buys, not of the model.
+- **Neither gives masks.** The pipeline labels the 3D points through the detector's masks (`detect.py`); a box-only detector would need a box
+  used as a coarse mask, or a segmenter such as SAM (Apache-2.0) after it. That work is only worth doing for a detector that wins the naming test,
+  and neither did. So the default stays YOLOE; the AGPL-free detection step is possible (OWLv2 plus a segmenter) but costs recall, precision and time.
+
+Limits: the same two scenes and hand-written names as before (a direction, not a leaderboard); one run each, times vary up to 2x; thresholds not
+tuned per model (0.25 for all; OWLv2 and Grounding DINO scores are calibrated differently from YOLO's, so another threshold could shift the
+recall/false trade-off).
+
+## A policy for an arm that is not the simulation: domain randomisation (PR16)
+
+PR13's policy scored 17 to 21 % on the mock arm. The fix tried here is the standard one: make the demonstrations with arms that vary. The scripted
+expert drives the real-arm back-end on a *randomised* mock arm (per episode: lag 0.25 to 0.65, objects 1.0 to 1.8 times heavier, pad friction 0.6 to
+1.0, encoder error 0 to 0.03 rad per joint, encoder noise 0.5 to 3 mrad, half speed), the observations are what that back-end reports, the recorded
+action is the expert's, and only moves that worked on the mock's own objects are kept. Same network and training as PR13, 600 demos each, 12 trials per
+cell, same objects and spots. Three arms to test on: the simulation; the default mock arm (lag 0.45, objects 1.4 times heavier, friction 0.8, encoder
+error 0.012); and a **harder, held-out mock arm outside every training range** (lag 0.2, objects 1.8 times heavier, friction 0.6, encoder error 0.04).
+
+| Policy trained on | Simulation | Default mock arm | Held-out hard arm |
+|---|---|---|---|
+| perfect simulated arm (PR13) | 73 % | 18 % | 14 % |
+| randomised mock arms | 72 % | **64 %** | **59 %** |
+| half simulation, half randomised mock arms | 68 % | 62 % | 51 % |
+| *the scripted skill, for reference* | 94 % | 92 % | 65 % |
+
+Per task, randomised-mock policy on the default mock arm (next to / to the left / on top of): flat 58 / 75 / 58 %, box 92 / 92 / 92 %, cylinder 0 / 8 / 0 %,
+ball 92 / 100 / 100 %.
+
+What this says:
+
+- **Randomising the arm in the data closes most of the gap.** The same network goes from 18 % to 64 % on the default mock arm and from 14 % to 59 % on an
+  arm it never saw, and loses nothing on the simulation (72 % against 73 %). On the hard arm it is within 6 points of the scripted skill (65 %),
+  which itself falls from 92 % to 65 % there: the hard arm is hard for everyone.
+- **Mixing in perfect-arm demos did not help** (62 % and 51 % against 64 % and 59 %): the cheap data dilutes the data that matters.
+- **The boxes and the balls are nearly solved** (92 to 100 %), the flat bar is the middle (33 to 75 %), the **tall cylinder stays at 0 to 8 %**:
+  6 mm of clearance and about a centimetre of arm error are beyond what a policy that only sees the arm's own readings can do (see PR14 for looking at the gripper).
+- **What it is not:** a result on hardware. The held-out arm is the same kind of simulation as the training arms, with different numbers. A policy that
+  survives it is more robust to lag, offsets and weight, not proven on a real arm, a real camera or real friction.
+
+Limits: one training run per row (no seeds averaged), 12 trials per cell (one failure is 8 points), 600 demos each; the demos are still from one scripted
+teacher, so the policy can only approach it.

@@ -46,6 +46,22 @@ the network has about half a million weights and trains in about a minute).
 `--human-weight 5` counts your own demonstrations five times as much as the simulated ones. The result is a plain numpy `.npz` and a
 `.json` with the training and validation loss.
 
+## Make the policy work on an arm that is not the simulation
+
+A policy trained on the perfect simulated arm does about 18 % on the mock arm (lag, encoder error, heavy objects). Train it on demonstrations made
+through the real-arm back-end with **randomised** arm parameters instead:
+
+```bash
+<robot python> -m echotwin.robot.demos --n 600 --backend mock --out data/policy/mock_demos       # about 8 minutes
+<perception python> -m echotwin.robot.train_policy data/policy/mock_demos --epochs 150 --hidden 512 --grip-weight 5 --out data/policy/act_lite.npz
+<robot python> -m echotwin.robot.skillcheck --policy data/policy/act_lite.npz --backend mock --trials 12
+<robot python> -m echotwin.robot.skillcheck --policy data/policy/act_lite.npz --backend mock --mock-lag 0.2 --mock-mass 1.8 --mock-friction 0.6 --encoder-offset 0.04   # a held-out arm
+```
+
+In our test this took the policy from 18 % to 64 % on the default mock arm and from 14 % to 59 % on an arm outside every training range
+(`docs/RESULTS.md`). Mixing in demos from the perfect arm did not help. The ranges are in `MockDriver.RANGES`; when you have a real arm, measure its
+lag and offsets and make the ranges bracket them.
+
 ## Use
 
 ```bash
@@ -59,7 +75,7 @@ shown still use the scripted skill. STOP stops the policy like any other move.
 ## What to expect, and what is missing
 
 The numbers are in `docs/RESULTS.md`: with 600 simulated demos the policy does 73 % of the 12 tasks in the simulation (the scripted skill: 94 %)
-and about 20 % on the mock arm. Things to keep in mind:
+and about 20 % on the mock arm (64 % when it is trained on randomised arms: see above). Things to keep in mind:
 
 - A policy trained on simulated, scripted demos copies the scripted skill; it cannot be better than its teacher, and it does not work on the mock
   arm (lag, encoder offsets), let alone a real one. To get there you need real teleoperated demos (and images, so that it can see), then LeRobot's ACT is the natural next tool.
