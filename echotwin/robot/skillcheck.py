@@ -23,7 +23,6 @@ from pathlib import Path
 import numpy as np
 
 from .features import move_things as MT
-from .features.measure import measure
 from .features import prop_skills as PS
 from .scene import Layout
 from .world import CTRL_DT, World
@@ -60,24 +59,6 @@ def _spawn(rng, w_probe: World | None, k: float):
     raise RuntimeError("no two spots found")
 
 
-def make_task(w: World, plan: dict, heard: str) -> dict:
-    """The same task description the robot makes for a spoken move (see Sim._make_prop_task)."""
-    me = "prop_0"
-    pr = w.layout.props[0]
-    goal = MT.goal_xy(w, plan)
-    o = w.obj_pos(me)
-    shape = pr.get("shape", "box")
-    task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape, "name": pr["name"],
-            "instruction": heard, "goal": [float(goal[0]), float(goal[1])], "ref": "prop_1" if plan["goal"][0] == "near" else None,
-            "m": measure(w, me),
-            "h": float(w.half(me)), "tallest": float(w.tallest() if hasattr(w, "tallest") else max(2 * w.half(n) for n in w.things())),
-            "start": [float(o[0]), float(o[1])]}
-    if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
-        task["stack"] = True
-        task["ref_name"] = w.layout.props[1]["name"]
-    return task
-
-
 def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill_fn=None, backend: str = "sim",
           loop: bool = False, disturb: str | None = None, policy=None, align: bool | None = None, encoder_offset: float | None = None) -> dict:
     """One move. `size` overrides the shape's size; `skill_fn(task) -> style` replaces the default skill;
@@ -111,7 +92,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
         w = RealBackend(w, drv, camera=mock_camera(drv))
         w.settle(10)
     truth = w.driver.plant if backend == "mock" else w     # what really happened: judged here, not on what the robot believes
-    task = make_task(w, plan, f"put the mover {task_name}")
+    task = PS.make_task(w, plan, f"put the mover {task_name}")
     style = skill_fn(task) if skill_fn else dict(PS.DEFAULTS)
     before = {n: truth.obj_pos(n)[:2].copy() for n in truth.things()}
     push = None

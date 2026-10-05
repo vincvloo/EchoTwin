@@ -119,7 +119,7 @@ def test_the_simulation_with_the_loop_on_still_moves_things_and_logs_the_attempt
     s.voice.emit = s.emit
     for ep in range(1):                                          # one demo from a good run, so it plans by itself
         pass
-    task, goal, o = s._make_prop_task({"prop": 0, "goal": ("near", 1, "next to")}, "put the cube next to the mark")
+    task = PS.make_task(s.world, {"prop": 0, "goal": ("near", 1, "next to")}, "put the cube next to the mark")
     skill = dict(PS.DEFAULTS)
     wps, lp = PS.loop_start(s.world, task, skill)
     s.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": s.world.grasp_yaw("prop_0"), "loop": lp,
@@ -149,7 +149,7 @@ def test_in_the_app_three_failures_end_in_asking_to_be_shown(monkeypatch, tmp_pa
     out = []
     s.emit = out.append
     s.voice.emit = s.emit
-    task, goal, o = s._make_prop_task({"prop": 0, "goal": ("near", 1, "next to")}, "put the cube next to the mark")
+    task = PS.make_task(s.world, {"prop": 0, "goal": ("near", 1, "next to")}, "put the cube next to the mark")
     skill = dict(PS.DEFAULTS)
     wps, lp = PS.loop_start(s.world, task, skill)
     s.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": s.world.grasp_yaw("prop_0"), "loop": lp,

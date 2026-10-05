@@ -16,12 +16,32 @@ import numpy as np
 
 from ..world import VMAX, World
 from . import measure as M
+from . import move_things as MT
 
 MIN_PROP_DEMOS = 1
 ASK = 1.0
 KNOWN = 1.0                  # a demo this close in size (see measure.distance) counts as "a similar object"
 KIND_LABEL = M.CLASS_LABEL   # the dashboard cards: demos per size class
 DEFAULTS = {"grip": 1.0, "lift": 0.05, "drop": 0.004, "speed": 0.2}
+
+
+def make_task(world: World, plan: dict, heard: str) -> dict:
+    """The description of one move that everything else works from: the robot, the demos, the experiments."""
+    i = plan["prop"]
+    me = f"prop_{i}"
+    pr = world.layout.props[i]
+    goal = MT.goal_xy(world, plan)
+    o = world.obj_pos(me)
+    shape = pr.get("shape", "box")
+    task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
+            "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
+            "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
+            "h": float(world.half(me)), "tallest": float(world.tallest()), "m": M.measure(world, me),
+            "start": [float(o[0]), float(o[1])]}
+    if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
+        task["stack"] = True
+        task["ref_name"] = world.layout.props[plan["goal"][1]]["name"]
+    return task
 
 
 # ---------------- geometry of success ----------------

@@ -8,25 +8,25 @@ import threading
 import time
 import traceback
 
-import cv2
-import mujoco
 import numpy as np
 
+from . import answers
 from . import backend as BK
 from . import policy as POL
 from . import config
 from . import runlog
 from .dataset import Dataset, score_episode, state_vector
-from .features import prop_skills as PS
 from .features import measure as M
+from .features import move_things as MT
+from .features import prop_skills as PS
 from .features import tasks as T
+from .practice import Practice
+from .render import FrameRenderer
 from .router import Intent
 from .scene import Layout
-
 from .voice import Voice
-from .world import CTRL_DT, VMAX, World
+from .world import CTRL_DT, VMAX
 
-W, H = 800, 600
 HUMAN_TIMEOUT = 0.5
 
 
@@ -64,7 +64,8 @@ class Sim:
         self.jpeg: bytes | None = None
         self.frame_id = 0
         self.tick = 0
-        self._renderer = None
+        self._renderer: FrameRenderer | None = None
+        self._practice: Practice | None = None
 
     # ---------------- plumbing ----------------
     def submit(self, fn, *args):
@@ -74,7 +75,7 @@ class Sim:
         threading.Thread(target=self._run, daemon=True, name="sim").start()
 
     def _run(self):
-        self._renderer = mujoco.Renderer(self.world.model, H, W)
+        self._renderer = FrameRenderer(self.world.model)
         nxt = time.perf_counter()
         while True:
             while not self.cmds.empty():
@@ -113,8 +114,7 @@ class Sim:
         self.world.build(layout)
         self.world.settle(5)
         if self._renderer is not None:
-            self._renderer.close()
-            self._renderer = mujoco.Renderer(self.world.view.model, H, W)
+            self._renderer.reopen(self.world.view.model)
         self.human_grip = False
         self.ghost = None
 
@@ -184,7 +184,7 @@ class Sim:
         if self.halted:
             pass
         elif self.authority == "robot" and self.mode == "practice":
-            action = self._practice_step()
+            action = self._practice.step()
         elif self.authority == "robot" and self.mode in ("replay", "move"):
             action = self._replay_step()
             recording = self.mode == "replay"
@@ -255,19 +255,17 @@ class Sim:
 
     # ---------------- everyday objects: done, do, or teach me (per object type) ----------------
     def handle_prop_task(self, plan: dict, heard: str):
-        from .features import move_things as MT
         w = self.world
-        props = w.layout.props
-        i = plan["prop"]
-        name, shape = props[i]["name"], props[i].get("shape", "box")
+        name = w.layout.props[plan["prop"]]["name"]
         if plan["goal"] is None:
             self.pending_move = plan
             return self.say(f"Where should I put the {name}? For example: next to another object, or to the left.")
         self.pending_move = None
         self.halted = False
         self._abort()
-        task, goal, o = self._make_prop_task(plan, heard)
+        task = PS.make_task(w, plan, heard)
         me = task["object"]
+        goal, o = np.array(task["goal"]), w.obj_pos(me)
         self.task = task
         where = MT.describe_goal(w, plan)
         # 1. already done?
@@ -285,7 +283,7 @@ class Sim:
         m = task["m"]
         n = self.skills.count(m)
         if n < PS.MIN_PROP_DEMOS:
-            return self._start_teach(task, reason="new_kind", why=f"no demos with something this size yet",
+            return self._start_teach(task, reason="new_kind", why="no demos with something this size yet",
                                      line=f"I've never moved something this size: {M.describe(m)}. Can you show me? "
                                           "Drive me with the keyboard, upload a video, or say practice.")
         # 3. plan from what I learned, then imagine it on a copy of the world
@@ -312,8 +310,6 @@ class Sim:
                    "parts": skill["parts"], "why": why})
         self.say(f"I'll move the {name} {where}. {T.confidence_words(u)}")
 
-    move_prop = handle_prop_task
-
     def practice(self, shape: str | None = None, per_kind: int = 3, live: bool = True, prop: int | None = None):
         """Create demos by practising in the twin: varied tries, only successes are kept.
         live=True runs in real time on screen, try by try; live=False runs instantly (tests)."""
@@ -325,109 +321,19 @@ class Sim:
         kinds = [shape] if shape else [c for c in M.CLASSES if c in classes]
         if prop is not None:
             kinds = [classes[prop]]
-        self.practice_state = {"kinds": kinds, "k": 0, "kept": 0, "tries": 0, "per": per_kind, "report": [],
-                               "cur": None, "prop": prop}
+        self._practice = Practice(self, kinds, per_kind, prop)
         self.halted = False
         self.mode, self.authority = "practice", "robot"
         if not live:
             while self.mode == "practice":
-                self.world.step(self._practice_step())
-
-    def _practice_new_try(self):
-        """Set up the next try on a fresh copy of the scanned table."""
-        from .features import move_things as MT
-        st, rng = self.practice_state, self.rng
-        kind = st["kinds"][st["k"]]
-        props = self.base_layout.props
-        movers = [st["prop"]] if st.get("prop") is not None else             [i for i in range(len(props)) if M.size_class(M.measure(self.world, f"prop_{i}")) == kind]
-        self._rebuild(self.base_layout)
-        self.world.settle(10)
-        w = self.world
-        i = int(rng.choice(movers))
-        others = [j for j in range(len(props)) if j != i]
-        r = rng.random()
-        if r < 0.55:
-            goal = ("near", int(rng.choice(others)), "next to")
-        elif r < 0.75:
-            goal = ("near", int(rng.choice(others)), "on top of")
-        else:
-            goal = ("dir", [(-1, 0), (1, 0), (0, -1), (0, 1)][int(rng.integers(4))], 0.15)
-        plan = {"prop": i, "goal": goal}
-        text = f"put the {props[i]['name']} {MT.describe_goal(w, plan)}"
-        task, _, _ = self._make_prop_task(plan, text)
-        style = {"grip": float(rng.uniform(-0.3, 0.3)), "lift": float(rng.uniform(0.03, 0.09)),
-                 "drop": float(rng.uniform(0.002, 0.012)), "speed": float(rng.uniform(0.14, 0.25))}
-        wps = PS.waypoints(w, task, style)
-        st["tries"] += 1
-        st["cur"] = {"task": task, "r": {"wps": wps, "i": 0, "speed": style["speed"], "yaw": w.grasp_yaw(task["object"])}, "frames": [], "settle": 0,
-                     "before": {k: w.obj_pos(k)[:2].copy() for k in w.things()}, "text": text}
-        self.task = task
-        self.ghost = np.array([wp[1] for wp in wps if wp[0] == "move"])
-        self.log("system", f"Practice {PS.KIND_LABEL[kind]} {st['kept'] + 1}/{st['per']} (try {st['tries']}): {text}")
-
-    def _practice_step(self):
-        st = self.practice_state
-        w = self.world
-        if st["cur"] is None:
-            self._practice_new_try()
-            return np.array([0, 0, 0, 0.0])
-        cur = st["cur"]
-        a = PS.waypoint_action(w, cur["r"])
-        if a is not None:
-            cur["frames"].append({"timestamp": round(len(cur["frames"]) * CTRL_DT, 3),
-                                  "state": state_vector(w, cur["task"]["object"], cur["task"]["goal"]),
-                                  "action": [float(x) for x in a]})
-            return a
-        cur["settle"] += 1
-        if cur["settle"] < 20:
-            return np.array([0, 0, 0, 0.0])
-        # judge the try
-        res = PS.outcome(w, cur["task"], cur["before"])
-        ok = res["ok"] and PS.goal_met(w, cur["task"])
-        if ok:
-            self.dataset.add(cur["task"], cur["frames"], "practice", True)
-            st["kept"] += 1
-        self.log("system", "✓ kept" if ok else f"✗ {res['text']}")
-        st["cur"] = None
-        self.ghost = None
-        kind = st["kinds"][st["k"]]
-        if st["kept"] >= st["per"] or st["tries"] >= st["per"] * 4:
-            st["report"].append(f"{PS.KIND_LABEL[kind]}: {st['kept']} of {st['tries']} worked")
-            st["k"] += 1
-            st["kept"] = st["tries"] = 0
-            if st["k"] >= len(st["kinds"]):
-                self.mode, self.authority = "idle", "human"
-                self._rebuild(self.base_layout)
-                self._refit()
-                self.say("I practised in my twin. " + "; ".join(st["report"]) + ".")
-        return np.array([0, 0, 0, 0.0])
-
-    def _make_prop_task(self, plan: dict, heard: str):
-        from .features import move_things as MT
-        w = self.world
-        i = plan["prop"]
-        pr = w.layout.props[i]
-        me = f"prop_{i}"
-        goal = MT.goal_xy(w, plan)
-        o = w.obj_pos(me)
-        shape = pr.get("shape", "box")
-        task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
-                "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
-                "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
-                "h": float(w.half(me)), "tallest": float(w.tallest()), "m": M.measure(w, me),
-                "start": [float(o[0]), float(o[1])]}
-        if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
-            task["stack"] = True
-            task["ref_name"] = w.layout.props[plan["goal"][1]]["name"]
-        return task, goal, o
+                self.world.step(self._practice.step())
 
     def play_prop_video(self, plan: dict, heard: str):
         """Replay a move seen in a video of your hand, with the robot, in the twin; record it as a demo."""
-        from .features import move_things as MT
         self.halted = False
         self._abort()
         name = self.world.layout.props[plan["prop"]]["name"]
-        task, goal, o = self._make_prop_task(plan, f"put the {name} {MT.describe_goal(self.world, plan)}")
+        task = PS.make_task(self.world, plan, f"put the {name} {MT.describe_goal(self.world, plan)}")
         self.task = task
         wps = PS.waypoints(self.world, task, dict(PS.DEFAULTS))
         self.replay = {"wps": wps, "i": 0, "speed": 0.15, "task": task, "yaw": self.world.grasp_yaw(task["object"])}
@@ -465,21 +371,14 @@ class Sim:
         self.haptic([60, 60, 60])
 
     # ---------------- done, do, or teach me ----------------
-    def _start_teach(self, task, reason="new", announce=True, line=None, why=None):
+    def _start_teach(self, task, reason: str, why: str, line: str):
         self.task = task
         self.mode, self.authority = "teach", "human"
         self.frames, self.ghost, self.plan = [], None, None
         self.settled = 0
         self.human_grip = self.world.hand.grip
         self.emit({"t": "decision", "kind": "teach", "task": task, "reason": reason, "why": why})
-        if announce and line:
-            self.say(line)
-        elif announce:
-            self.say({
-                "new": "I haven't learned that yet. Can you show me?",
-                "more": "I've only seen that once. Can you show me again?",
-                "unsure": "I'm not sure about this layout. Can you show me?",
-            }[reason])
+        self.say(line)
         self.haptic([80, 40, 80])
 
     # ---------------- utterances ----------------
@@ -490,9 +389,9 @@ class Sim:
         if k == "control":
             return self._control(n)
         if k == "robot_q":
-            return self.say(self.answer_robot(n))
+            return self.say(answers.about_robot(self, n))
         if k == "scene_q":
-            return self.say(self.answer_scene(n, {**it.data, "text": it.text}))
+            return self.say(answers.about_table(self.world, n, {**it.data, "text": it.text}))
         self.say("Tell me what to move on the table, like: put the glass next to the chocolate.")
 
     def _control(self, n):
@@ -532,133 +431,19 @@ class Sim:
                 w.go_rest()
             return self.say("Home.")
 
-    # ---------------- answers from state (no AI) ----------------
-    def answer_robot(self, n) -> str:
-        name = config.ROBOT_NAME
-        if n == "why_stop":
-            if self.halted:
-                return {"you said stop": "You told me to stop.", "shake": "You shook the phone.",
-                        "button": "You pressed stop."}.get(self.halt_reason, f"Because {self.halt_reason}.")
-            return "I haven't stopped."
-        if n == "doing":
-            if self.halted:
-                return "Nothing. I'm stopped. Say continue when ready."
-            t = self.task
-            return {
-                "move": f"Moving the {t['name']}." if t else "Working.",
-                "teach": f"Watching you. You're showing me: {t['instruction']}." if t else "Watching you.",
-                "review": "Waiting for you to keep or discard the demo.",
-                "replay": "Replaying your video in my twin.",
-                "practice": "Practising in my twin.",
-            }.get(self.mode, "Waiting for an instruction.")
-        props = self.world.layout.props
-        if not props:
-            return "Scan your table first, so I know what is on it."
-        names = [p["name"] for p in props]
-        if n == "sure":
-            t = self.task
-            if self.plan and t:
-                return (f"About {T.percent_sure(self.plan['uncertainty'])} percent. "
-                        f"{self.plan.get('why', '').split(' · ')[0]}.")
-            if t:
-                c = self.skills.count(M.from_task(t))
-                return f"Not sure yet. I have {c} demo{'s' if c != 1 else ''} of something this size."
-            return "Tell me what to move, and I'll tell you how sure I am."
-        if n == "learned":
-            known = [f"{PS.KIND_LABEL[k]} from {c} demo{'s' if c != 1 else ''}" for k, c in self.skills.counts().items() if c]
-            if not known:
-                return "Nothing on this table yet. Tell me to move something and show me once."
-            return "I know how to move " + " and ".join(known) + "."
-        if n == "who":
-            return f"I'm {name}. Tell me what to move on your table, and where."
-        if n == "help":
-            other = names[1] if len(names) > 1 else "the table's middle"
-            return f"Try: put the {names[0]} next to the {other}. Or say stop, anytime."
-        return "I'm not sure."
-
-    def where_prop(self, i: int) -> str:
-        w = self.world
-        name = w.layout.props[i]["name"]
-        me = f"prop_{i}"
-        if w.hand.attached == me:
-            return f"I'm holding the {name}."
-        p = w.obj_pos(me)
-        lr = "left" if p[0] < -0.1 else "right" if p[0] > 0.1 else "middle"
-        fb = "front" if p[1] < -0.08 else "back" if p[1] > 0.08 else "centre"
-        near = [(np.linalg.norm(w.obj_pos(f"prop_{j}")[:2] - p[:2]) - w.radius(me) - w.radius(f"prop_{j}"), j)
-                for j in range(len(w.layout.props)) if j != i]
-        close = min(near) if near else None
-        extra = f", next to the {w.layout.props[close[1]]['name']}" if close and close[0] < 0.06 else ""
-        spot = f"at the {fb} {lr}" if lr != "middle" else f"in the {fb} middle"
-        return f"The {name} is {spot} of the table{extra}."
-
-    def answer_scene(self, n, data) -> str:
-        w = self.world
-        props = w.layout.props
-        if n == "which":
-            k = data.get("index")
-            if not props:
-                return "I haven't mapped any objects. Snap a photo of your table first."
-            if k is None or not 1 <= k <= len(props):
-                return f"I have {len(props)} objects, numbered 1 to {len(props)}."
-            return f"Object {k} is {props[k - 1]['name']}."
-        if not props:
-            return "I don't see anything yet. Snap a photo of your table first."
-        if n == "count":
-            return f"I see {len(props)} thing{'s' if len(props) != 1 else ''} on the table."
-        if n == "where":
-            from .features import move_things as MT
-            ment = MT._mentions(data.get("text", ""), props)
-            if ment:
-                return self.where_prop(ment[0][1])
-            return " ".join(self.where_prop(i) for i in range(len(props)))
-        return self.scene_summary()
-
-    def scene_summary(self) -> str:
-        things = [p["name"] for p in self.world.layout.props]
-        if not things:
-            return "I don't see anything on the table yet."
-        from .features.everyday import listing
-        return f"On your table I see {listing(things)}."
-
     # ---------------- output ----------------
     def _render(self):
-        r = self._renderer
-        view = self.world.view
-        r.update_scene(view.data, camera="photo" if view.layout.view else "main")
-        if self.ghost is not None and len(self.ghost):
-            scn = r.scene
-            u = self.plan["uncertainty"] if self.plan else 0.5
-            rgba = np.array([0.2, 0.9, 0.5, 0.55] if u < 0.45 else [1.0, 0.75, 0.2, 0.55] if u < 0.75
-                            else [1.0, 0.35, 0.3, 0.55], dtype=np.float32)
-            for p in self.ghost[::3]:
-                if scn.ngeom >= scn.maxgeom:
-                    break
-                mujoco.mjv_initGeom(scn.geoms[scn.ngeom], mujoco.mjtGeom.mjGEOM_SPHERE,
-                                    np.array([0.005, 0, 0]), p.astype(np.float64), np.eye(3).flatten(), rgba)
-                scn.ngeom += 1
-        img = r.render()
-        bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
         if self.halted:
-            cv2.rectangle(bgr, (0, 0), (W - 1, H - 1), (40, 40, 230), 10)
-            cv2.putText(bgr, f"STOPPED ({self.halt_reason})", (24, 52), cv2.FONT_HERSHEY_SIMPLEX, 1.1,
-                        (40, 40, 230), 3, cv2.LINE_AA)
-        elif self.mode == "practice" and getattr(self, "practice_state", None):
-            st = self.practice_state
-            kind = st["kinds"][min(st["k"], len(st["kinds"]) - 1)]
-            label = f"PRACTICE {min(st['kept'] + 1, st['per'])}/{st['per']} · {PS.KIND_LABEL[kind]} · try {st['tries']}"
-            cv2.putText(bgr, label, (20, H - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 5, cv2.LINE_AA)
-            cv2.putText(bgr, label, (20, H - 70), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 120), 2, cv2.LINE_AA)
-            cur = st.get("cur")
-            if cur:
-                cv2.putText(bgr, cur["text"], (20, H - 36), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 0), 4, cv2.LINE_AA)
-                cv2.putText(bgr, cur["text"], (20, H - 36), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 255), 1, cv2.LINE_AA)
+            overlay = ("halted", self.halt_reason)
+        elif self.mode == "practice" and self._practice:
+            overlay = ("practice", *self._practice.overlay())
         elif self.mode == "teach" and self.frames:
-            cv2.circle(bgr, (30, 34), 11, (40, 40, 230), -1)
-            cv2.putText(bgr, "REC", (50, 45), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (40, 40, 230), 2, cv2.LINE_AA)
-        ok, buf = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 80])
-        if ok:
-            self.jpeg = buf.tobytes()
+            overlay = ("rec",)
+        else:
+            overlay = None
+        jpeg = self._renderer.jpeg(self.world.view, self.ghost, self.plan["uncertainty"] if self.plan else 0.5, overlay)
+        if jpeg:
+            self.jpeg = jpeg
             self.frame_id += 1
 
     def _emit_state(self):
