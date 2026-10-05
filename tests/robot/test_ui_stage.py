@@ -69,3 +69,9 @@ def test_the_shared_style_and_script_are_served():
     assert css.status_code == 200 and "prefers-color-scheme:dark" in css.text and "text/css" in css.headers["content-type"]
     js = c.get("/ui/stage.js")
     assert js.status_code == 200 and "stageOf" in js.text
+
+
+def test_pages_and_scripts_are_revalidated_not_cached_blindly():
+    c = TestClient(server.app)
+    for url in ("/", "/phone", "/ui/ui.css", "/ui/stage.js"):
+        assert c.get(url).headers["cache-control"] == "no-cache", url
