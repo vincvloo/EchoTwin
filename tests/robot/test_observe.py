@@ -21,7 +21,8 @@ def _layout(props=PROPS):
     return lay
 
 
-def _mock(props=PROPS):
+def _mock(props=None):
+    props = props or PROPS
     twin = World(_layout(props))
     drv = D.MockDriver(twin.layout, twin.arm)
     return R.RealBackend(twin, drv, camera=R.mock_camera(drv)), drv
@@ -90,3 +91,41 @@ def test_without_a_camera_the_real_backend_can_only_believe():
     twin = World(_layout())
     r = R.RealBackend(twin, D.MockDriver(twin.layout, twin.arm))
     assert np.allclose(r.observe("prop_0"), twin.obj_pos("prop_0")[:2])
+
+
+# ---------------- looking at the gripper ----------------
+CLEAR = [("cube", "box", (-0.20, 0.20), (0.02, 0.02, 0.02), (0.8, 0.2, 0.2)),
+         ("ball", "round", (0.25, 0.20), (0.025, 0.025, 0.025), (0.2, 0.3, 0.9))]      # off to the sides, so the hovering gripper meets nothing
+
+
+def _hover(r, tgt, yaw=0.0):
+    for _ in range(170):
+        d = np.asarray(tgt) - r.hand_pos()
+        r.step((*np.clip(d * 5, -0.25, 0.25), 0, yaw))
+
+
+@pytest.mark.parametrize("tgt,yaw", [([0.05, 0.0, 0.12], 0.0), ([-0.1, 0.05, 0.12], 0.0), ([0.1, 0.12, 0.08], 0.0),
+                                      ([-0.15, 0.0, 0.2], 0.0), ([0.05, 0.05, 0.12], 1.57), ([-0.05, 0.1, 0.1], 0.8)])
+def test_the_camera_sees_where_the_gripper_really_is(tgt, yaw):
+    r, drv = _mock(CLEAR)
+    _hover(r, tgt, yaw)
+    seen = r.see_tool()
+    truth = drv.plant.hand_pos()[:2]
+    assert seen is not None and np.linalg.norm(seen - truth) < 0.004, (seen, truth)
+
+
+def test_the_joints_are_off_and_the_camera_knows_it():
+    r, drv = _mock(CLEAR)
+    _hover(r, [0.05, 0.0, 0.12])
+    believed, truth = r.hand_pos()[:2], drv.plant.hand_pos()[:2]
+    seen = r.see_tool()
+    # whatever the encoder error is, looking is closer to the truth than the joints
+    assert np.linalg.norm(seen - truth) <= np.linalg.norm(believed - truth) + 0.001
+
+
+def test_the_simulation_and_a_camera_less_arm_report_the_joints():
+    w = World(_layout())
+    assert np.allclose(w.see_tool(), w.hand_pos()[:2])
+    twin = World(_layout())
+    r = R.RealBackend(twin, D.MockDriver(twin.layout, twin.arm))
+    assert np.allclose(r.see_tool(), r.hand_pos()[:2])

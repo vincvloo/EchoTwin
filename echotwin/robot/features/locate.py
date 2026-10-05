@@ -124,11 +124,13 @@ class PlaneMap:
 DARK = 95                 # grey level (0 to 255) below which a pixel can be a gripper pad: dark rubber, darker than the hand and the table
 
 
-def find_pads(bgr: np.ndarray, expected_px, sep_px: float, dark: int = DARK) -> tuple[float, float] | None:
+def find_pads(bgr: np.ndarray, expected_px, sep_px: float, axis=None, dark: int = DARK) -> tuple[float, float] | None:
     """Where the gripper is, seen from above: the midpoint (x, y) in pixels of its two pads, or None.
 
-    The pads are the darkest things near the tool: two small dark blobs about `sep_px` apart on one line. `expected_px` is where
-    the joints say the tool is; the search window is generous because that is the number being checked."""
+    The pads are the darkest compact things near the tool: two small dark blobs about `sep_px` apart. `expected_px` is where the
+    joints say the tool is; the window is generous because that is the number being checked. The arm's own forearm can hide one pad: when only
+    one is seen and `axis` (a unit vector in the image along the line the jaws close on) is given, the midpoint is half a separation
+    from it, on the side nearer to where the tool is expected."""
     h, w = bgr.shape[:2]
     r = int(max(1.1 * sep_px, 40))
     cx, cy = int(round(expected_px[0])), int(round(expected_px[1]))
@@ -137,19 +139,39 @@ def find_pads(bgr: np.ndarray, expected_px, sep_px: float, dark: int = DARK) -> 
         return None
     grey = cv2.cvtColor(bgr[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
     mask = (grey < dark).astype(np.uint8)
-    n, _, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
-    blobs = [(cents[i], stats[i, cv2.CC_STAT_AREA]) for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= 0.02 * sep_px ** 2]
+    n, labels, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    blobs = []
+    for i in range(1, n):
+        a_ = int(stats[i, cv2.CC_STAT_AREA])
+        if not 0.006 * sep_px ** 2 <= a_ <= 0.08 * sep_px ** 2:
+            continue
+        pts = np.column_stack(np.nonzero(labels == i)[::-1]).astype(np.float32)
+        (_, _), (rw, rh), _ = cv2.minAreaRect(pts)
+        solid = a_ >= 0.7 * max(rw * rh, 1.0) and max(rw, rh) <= 5 * max(min(rw, rh), 1.0)       # a pad is a small solid rectangle, a shade is not
+        if solid:
+            blobs.append((cents[i], a_))
+    here = np.array([cx - x0, cy - y0], float)
     best, score = None, 0.0
     for i in range(len(blobs)):
         for j in range(i + 1, len(blobs)):
             (a, aa), (b, ba) = blobs[i], blobs[j]
             d = float(np.hypot(*(a - b)))
-            if not 0.7 * sep_px <= d <= 1.3 * sep_px or max(aa, ba) > 2.5 * min(aa, ba):
+            if not 0.7 * sep_px <= d <= 1.3 * sep_px or max(aa, ba) > 4 * min(aa, ba):
                 continue
             mid = (a + b) / 2
-            s = min(aa, ba) / (1.0 + np.hypot(mid[0] - (cx - x0), mid[1] - (cy - y0)) / sep_px)       # similar, big and near the expectation
+            s = min(aa, ba) / (1.0 + np.hypot(*(mid - here)) / sep_px)       # similar, big and near the expectation
             if s > score:
                 best, score = mid, s
+    if best is None and axis is not None and blobs:                          # one pad hidden: use the other one
+        u = np.asarray(axis, float) / (np.linalg.norm(axis) or 1.0)
+        for c, aa in blobs:
+            for sgn in (-1.0, 1.0):
+                mid = c + sgn * 0.5 * sep_px * u
+                dd = float(np.hypot(*(mid - here)))
+                if dd < 0.8 * sep_px:
+                    s = aa / (1.0 + dd / sep_px)
+                    if s > score:
+                        best, score = mid, s
     if best is None:
         return None
     return float(best[0] + x0), float(best[1] + y0)

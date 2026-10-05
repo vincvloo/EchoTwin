@@ -12,6 +12,7 @@ import numpy as np
 
 from .features import locate as L
 
+PAD_DZ = 0.03             # the pads seen from above are centred about this far above the tool point (calibrated on the render)
 SIZE = (640, 480)            # frame size (width, height)
 CAMERA = "top"
 
@@ -88,3 +89,12 @@ class CameraObserver:
         if f is None:
             return None
         return plane.to_table(f.px, z)
+
+    def observe_tool(self, expected_xy, z: float, jaw_sep_m: float, yaw: float = 0.0) -> np.ndarray | None:
+        """Where the gripper really is: the table (x, y) under the midpoint of its two pads, seen by the camera, or None.
+        `expected_xy`, `z`: where the joints say the tool is; `jaw_sep_m`: the distance between the pads; `yaw`: the direction they close along."""
+        plane = self.plane
+        zp = z + PAD_DZ
+        px = plane.to_pixel(expected_xy, zp)
+        mid = L.find_pads(self.source.frame(), px, plane.metres_to_pixels(jaw_sep_m, expected_xy, zp), axis=(np.cos(yaw), -np.sin(yaw)))   # image y points down
+        return None if mid is None else plane.to_table(mid, zp)
