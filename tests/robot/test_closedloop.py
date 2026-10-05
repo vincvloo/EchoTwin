@@ -162,3 +162,64 @@ def test_in_the_app_three_failures_end_in_asking_to_be_shown(monkeypatch, tmp_pa
     said = [m["text"] for m in out if m.get("t") == "log"]
     assert s.mode == "teach", said[-3:]
     assert any("I missed the cube. Trying again" in t for t in said) and any("didn't go well" in t for t in said)
+
+
+# ---------------- lining the gripper up by looking at it ----------------
+GLASS = {"name": "glass", "shape": "cylinder", "pos": (0.05, 0.0), "yaw": 0.0, "size": (0.035, 0.035, 0.05), "rgb": (0.8, 0.8, 0.8)}
+
+
+def _off_arm(encoder_offset=0.02, seed=3):
+    """A mock arm whose encoders are 1 degree or so off, a glass to pick and a mark to put it by."""
+    lay = Layout()
+    lay.props = [dict(GLASS), {"name": "mark", "shape": "box", "pos": (-0.15, 0.1), "yaw": 0.0, "size": (0.02, 0.02, 0.02), "rgb": (0.2, 0.3, 0.9)}]
+    twin = World(lay)
+    drv = D.MockDriver(twin.layout, twin.arm, encoder_offset=encoder_offset, seed=seed)
+    return R.RealBackend(twin, drv, camera=R.mock_camera(drv)), drv.plant
+
+
+def _until_grip(b, plant, align, hook=None):
+    task = {"object": "prop_0", "name": "glass", "goal": np.array([-0.15, 0.0]), "h": 0.05}
+    wps, lp = PS.loop_start(b, task, dict(PS.DEFAULTS), align=align)
+    r = {"wps": wps, "i": 0, "speed": 0.2, "yaw": b.grasp_yaw("prop_0"), "loop": lp}
+    for _ in range(2500):
+        step = r["wps"][r["i"]] if r["i"] < len(r["wps"]) else None
+        if step is not None and step[0] == "grip" and step[1] == 1.0:
+            break
+        a = PS.waypoint_action(b, r)
+        if a is None:
+            break
+        b.step(a)
+    return r, float(np.linalg.norm(plant.hand_pos()[:2] - plant.obj_pos("prop_0")[:2]))
+
+
+def test_the_gripper_is_lined_up_with_the_object_when_the_encoders_are_off():
+    b, plant = _off_arm()
+    r, err_on = _until_grip(b, plant, align=True)
+    b2, plant2 = _off_arm()
+    _, err_off = _until_grip(b2, plant2, align=False)
+    assert err_off > 0.008, err_off                               # without looking, the gripper is about a centimetre away
+    assert err_on < 0.004 and err_on < err_off / 2, (err_on, err_off)
+    assert any("off from where my joints say" in e for e in r["loop"]["log"]) and any("Lined up" in e for e in r["loop"]["log"])
+
+
+def test_a_gripper_that_cannot_be_seen_is_not_corrected_and_the_robot_says_so():
+    b, plant = _off_arm()
+    b.see_tool = lambda: None
+    r, _ = _until_grip(b, plant, align=True)
+    assert "I can't see the gripper" in " ".join(r["loop"]["log"]) and not r["loop"]["bias"].any()
+
+
+def test_an_arm_too_far_off_is_not_chased_it_asks_to_be_shown():
+    b, plant = _off_arm()
+    b.see_tool = lambda: b.hand_pos()[:2] + np.array([0.05, 0.0])   # always 5 cm away from where it should be
+    r, _ = _until_grip(b, plant, align=True)
+    log = " ".join(r["loop"]["log"])
+    assert "I need to be shown" in log and r["loop"]["attempts"] == r["loop"]["max"]
+
+
+def test_the_simulation_does_not_look_at_itself_and_the_switch_works():
+    w = World(_layout())
+    assert not PS.align_on(w, {}) and PS.align_on(w, {"ALIGN": "on"}) and not PS.align_on(_off_arm()[0], {"ALIGN": "off"})
+    assert PS.align_on(_off_arm()[0], {})
+    wps, lp = PS.loop_start(w, {"object": "prop_0", "name": "cube", "goal": GOAL, "h": 0.025}, dict(PS.DEFAULTS))
+    assert lp["align"] is False

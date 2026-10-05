@@ -114,11 +114,24 @@ def closed_loop_on(world, env=None) -> bool:
     return v == "on" or (v == "auto" and getattr(world, "name", "sim") == "real")
 
 
-def loop_start(world, task: dict, skill: dict, max_attempts: int = MAX_ATTEMPTS) -> tuple[list, dict]:
+ALIGN_TOL = 0.002         # the seen gripper is within this of where it should be: lined up
+ALIGN_LOOKS = 3           # looks at the gripper before going down
+ALIGN_MAX = 0.03          # a bigger correction than this means something other than a small offset is wrong
+ALIGN_SAY = 0.003         # say it when the gripper was this far off
+
+
+def align_on(world, env=None) -> bool:
+    """ALIGN=on|off|auto: look at the gripper and line it up before going down. auto: on for an arm that can see itself (the real/mock arm)."""
+    v = ((os.environ if env is None else env).get("ALIGN") or "auto").strip().lower()
+    return v == "on" or (v == "auto" and getattr(world, "name", "sim") == "real")
+
+
+def loop_start(world, task: dict, skill: dict, max_attempts: int = MAX_ATTEMPTS, align: bool | None = None) -> tuple[list, dict]:
     """(first steps, loop state) of a move that looks before it grips: park the arm out of the way, then observe.
-    Everything after `observe` is planned from what is seen."""
+    Everything after `observe` is planned from what is seen. With `align`, the gripper is looked at and lined up before the descent."""
     park = [float(v) for v in world.observe_pose(world.obj_pos(task["object"])[:2])]
-    lp = {"task": task, "skill": skill, "attempts": 0, "max": max_attempts, "park": park, "planned": None, "log": []}
+    lp = {"task": task, "skill": skill, "attempts": 0, "max": max_attempts, "park": park, "planned": None, "log": [],
+          "align": align_on(world) if align is None else bool(align), "bias": np.zeros(2), "looks": 0}
     return _park_steps(world, lp) + [("observe", None)], lp
 
 
@@ -171,10 +184,61 @@ def _observe(world, r):
     if np.linalg.norm(np.asarray(seen, float) - believed) > SEEN_MOVED and lp["attempts"] == 0:
         _say(r, f"The {name} isn't where I thought. Adjusting.")
     lp["planned"] = np.asarray(seen, float)
-    w = waypoints(world, task, lp["skill"], pos=seen)
-    r["wps"] = r["wps"][:r["i"]] + [w[0], w[1], w[2], ("check_grasp", None), w[3], ("check_lift", None), w[4], w[5], w[6], w[7],
-                                     *_park_steps(world, lp), ("check_goal", None)]
+    lp["bias"], lp["looks"] = np.zeros(2), 0
+    _plan_pick(world, r)
+    return _hold(world, r)
+
+
+def _shift(step, bias):
+    kind, arg = step
+    return (kind, [arg[0] - bias[0], arg[1] - bias[1], arg[2]]) if kind == "move" else step
+
+
+def _plan_pick(world, r, align: bool | None = None):
+    """From the current step on: hover over the object, (look at the gripper,) go down, grip, check, lift, carry, put down, park, check.
+    The picking moves are shifted by the measured error of the arm (`bias`), the placing moves are not: that error is local to the pose."""
+    lp = r["loop"]
+    w = waypoints(world, lp["task"], lp["skill"], pos=lp["planned"])
+    b = lp["bias"]
+    hover = [_shift(w[0], b)] + ([("align", None)] if (lp["align"] if align is None else align) else [])
+    r["wps"] = r["wps"][:r["i"]] + hover + [_shift(w[1], b), w[2], ("check_grasp", None), _shift(w[3], b), ("check_lift", None),
+                                            w[4], w[5], w[6], w[7], *_park_steps(world, lp), ("check_goal", None)]
     r["ticks"] = 0                                          # index i now points at the first step planned from what was seen
+
+
+def _align(world, r):
+    """Hovering over the object: look at where the gripper really is, and move the pick by the difference."""
+    lp = r["loop"]
+    name = lp["task"]["name"]
+    r["wait"] = r.get("wait", 0) + 1
+    if r["wait"] <= LOOK_TICKS:
+        return _hold(world, r)
+    r["wait"] = 0
+    seen = world.see_tool()
+    if seen is None:
+        _say(r, "I can't see the gripper well enough to line it up. Going on without.")
+        r["i"] += 1
+        return _hold(world, r)
+    want = np.asarray(waypoints(world, lp["task"], lp["skill"], pos=lp["planned"])[0][1][:2], float)      # the hover point, unshifted
+    resid = np.asarray(seen, float) - want
+    lp["looks"] += 1
+    if np.linalg.norm(resid) <= ALIGN_TOL:
+        if lp["looks"] > 1 or np.linalg.norm(lp["bias"]) > ALIGN_SAY:
+            _say(r, f"Lined up with the {name}.")
+        r["i"] += 1
+        return _hold(world, r)
+    lp["bias"] = lp["bias"] + resid
+    if np.linalg.norm(lp["bias"]) > ALIGN_MAX or lp["looks"] >= ALIGN_LOOKS:
+        bad = np.linalg.norm(lp["bias"]) > ALIGN_MAX
+        if bad or np.linalg.norm(resid) > 5 * ALIGN_TOL:
+            _say(r, f"The gripper is {np.linalg.norm(lp['bias']) * 1000:.0f} mm off from where my joints say and I cannot line it up. I need to be shown.")
+            lp["attempts"] = lp["max"]
+            return _end(r) or _hold(world, r)
+        _plan_pick(world, r, align=False)                   # close enough after the last look: go with the bias found so far
+        return _hold(world, r)
+    if np.linalg.norm(resid) > ALIGN_SAY and lp["looks"] == 1:
+        _say(r, f"The gripper is {np.linalg.norm(resid) * 1000:.0f} mm off from where my joints say. Lining it up.")
+    _plan_pick(world, r)                                    # the hover again with the corrected bias, then look once more
     return _hold(world, r)
 
 
@@ -220,6 +284,8 @@ def waypoint_action(world: World, r: dict, d=None, hs=None):
     kind, arg = r["wps"][r["i"]]
     if kind == "observe":
         return _observe(world, r)
+    if kind == "align":
+        return _align(world, r)
     if kind in ("check_grasp", "check_lift", "check_goal"):
         return _check(kind, world, r)
     if kind == "grip":
