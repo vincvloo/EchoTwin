@@ -48,4 +48,4 @@ In this order. Each step is only meaningful once the one before it is solid.
 - [x] A non-YOLO detector test (OWLv2, Grounding DINO: Apache-2.0): neither beats YOLOE with the public vocabulary and both are slower
       (`docs/RESULTS.md`). Open: a mask source (box as mask, or SAM) if the AGPL dependency must go; small
       tabletop objects are still named wrongly by every detector tested (`docs/RESULTS.md`).
-- [ ] The MobileCLIP2 text encoder licence (Apple) should be checked before any commercial use.
+- [x] The MobileCLIP2 text encoder licence (Apple) was checked: research and non-commercial only (`THIRD_PARTY.md`). A commercial build needs another text-capable detector (OWLv2 is Apache-2.0, slower and less accurate) or a closed-set model.
