@@ -121,3 +121,10 @@ def test_the_hand_body_and_the_table_are_not_pads():
     img = table()
     cv2.rectangle(img, (272, 214), (328, 246), (140, 125, 120), -1)         # only the hand: lighter than the pads
     assert L.find_pads(img, (300, 230), 60) is None
+
+
+def test_dark_coloured_blocks_are_not_pads():
+    img = table()
+    for x in (270, 330):
+        cv2.rectangle(img, (x - 4, 220), (x + 4, 240), (200, 90, 30), -1)      # dark saturated blue: as dark as a pad in grey, not neutral
+    assert L.find_pads(img, (300, 230), 60) is None

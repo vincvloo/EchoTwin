@@ -121,10 +121,11 @@ class PlaneMap:
         return cls(to_table, to_pixel)
 
 
+NEUTRAL = 60               # pads are black or grey: their saturation (0 to 255) is low
 DARK = 95                 # grey level (0 to 255) below which a pixel can be a gripper pad: dark rubber, darker than the hand and the table
 
 
-def find_pads(bgr: np.ndarray, expected_px, sep_px: float, axis=None, dark: int = DARK) -> tuple[float, float] | None:
+def find_pads(bgr: np.ndarray, expected_px, sep_px: float, axis=None, dark: int = DARK, need_pair: bool = False) -> tuple[float, float] | None:
     """Where the gripper is, seen from above: the midpoint (x, y) in pixels of its two pads, or None.
 
     The pads are the darkest compact things near the tool: two small dark blobs about `sep_px` apart. `expected_px` is where the
@@ -137,8 +138,10 @@ def find_pads(bgr: np.ndarray, expected_px, sep_px: float, axis=None, dark: int 
     x0, y0, x1, y1 = max(0, cx - r), max(0, cy - r), min(w, cx + r), min(h, cy + r)
     if x1 - x0 < 20 or y1 - y0 < 20:
         return None
-    grey = cv2.cvtColor(bgr[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
-    mask = (grey < dark).astype(np.uint8)
+    win = bgr[y0:y1, x0:x1]
+    grey = cv2.cvtColor(win, cv2.COLOR_BGR2GRAY)
+    sat = cv2.cvtColor(win, cv2.COLOR_BGR2HSV)[..., 1]
+    mask = ((grey < dark) & (sat < NEUTRAL)).astype(np.uint8)           # dark and grey: not a dark blue box, not a shaded green glass
     n, labels, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
     blobs = []
     for i in range(1, n):
@@ -162,7 +165,7 @@ def find_pads(bgr: np.ndarray, expected_px, sep_px: float, axis=None, dark: int 
             s = min(aa, ba) / (1.0 + np.hypot(*(mid - here)) / sep_px)       # similar, big and near the expectation
             if s > score:
                 best, score = mid, s
-    if best is None and axis is not None and blobs:                          # one pad hidden: use the other one
+    if best is None and axis is not None and blobs and not need_pair:        # one pad hidden: use the other one
         u = np.asarray(axis, float) / (np.linalg.norm(axis) or 1.0)
         for c, aa in blobs:
             for sgn in (-1.0, 1.0):

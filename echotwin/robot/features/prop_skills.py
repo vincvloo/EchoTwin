@@ -116,9 +116,12 @@ def closed_loop_on(world, env=None) -> bool:
 
 ALIGN_TOL = 0.002         # the seen gripper is within this of where it should be: lined up
 ALIGN_SETTLE = 10         # ticks to let the arm come to rest before looking at it
+ALIGN_ARRIVED = 0.008     # the arm counts as having arrived at a hover when it is this close to it
+ALIGN_ARRIVE_TRIES = 4    # times a move is repeated because the arm is still on its way
 ALIGN_LOOKS = 3           # looks at the gripper before going down
 ALIGN_MAX = 0.03          # a bigger correction than this means something other than a small offset is wrong
 ALIGN_SAY = 0.003         # say it when the gripper was this far off
+ALIGN_CLEARANCE = 0.012   # only look at the gripper when the object fits the jaws this tightly (m per side): a loose fit does not need it
 
 
 def align_on(world, env=None) -> bool:
@@ -127,12 +130,18 @@ def align_on(world, env=None) -> bool:
     return v == "on" or (v == "auto" and getattr(world, "name", "sim") == "real")
 
 
+def _tight_fit(world, me: str) -> bool:
+    """Is the object nearly as wide as the jaws open? Then a centimetre of error puts a pad on its rim."""
+    opening = float(world.twin.arm.max_opening or 0.08) if hasattr(world, "twin") else 0.08
+    return (opening - world.grasp_width(me)) / 2 < ALIGN_CLEARANCE
+
+
 def loop_start(world, task: dict, skill: dict, max_attempts: int = MAX_ATTEMPTS, align: bool | None = None) -> tuple[list, dict]:
     """(first steps, loop state) of a move that looks before it grips: park the arm out of the way, then observe.
     Everything after `observe` is planned from what is seen. With `align`, the gripper is looked at and lined up before the descent."""
     park = [float(v) for v in world.observe_pose(world.obj_pos(task["object"])[:2])]
     lp = {"task": task, "skill": skill, "attempts": 0, "max": max_attempts, "park": park, "planned": None, "log": [],
-          "align": align_on(world) if align is None else bool(align), "bias": np.zeros(2), "looks": 0}
+          "align": (align_on(world) and _tight_fit(world, task["object"])) if align is None else bool(align), "bias": np.zeros(2), "looks": 0}
     return _park_steps(world, lp) + [("observe", None)], lp
 
 
@@ -226,12 +235,19 @@ def _align(world, r):
     if r["wait"] <= ALIGN_SETTLE:                           # the arm is still creeping the last millimetres towards where it was sent
         return _hold(world, r)
     r["wait"] = 0
+    want = np.asarray(waypoints(world, lp["task"], lp["skill"], pos=lp["planned"])[0][1][:2], float)      # the hover point, unshifted
+    prev = r["wps"][r["i"] - 1] if r["i"] > 0 else None
+    if prev is not None and prev[0] == "move" and lp.get("arrive", 0) < ALIGN_ARRIVE_TRIES             and np.linalg.norm(world.hand_pos()[:2] - np.asarray(prev[1][:2])) > ALIGN_ARRIVED:
+        lp["arrive"] = lp.get("arrive", 0) + 1              # the move gave up before the arm got there (a long way at half speed): keep going
+        r["wps"].insert(r["i"], prev)
+        r["ticks"] = 0
+        return _hold(world, r)
+    lp["arrive"] = 0
     seen = world.see_tool()
     if seen is None:
         _say(r, "I can't see the gripper well enough to line it up. Going on without.")
         r["i"] += 1
         return _hold(world, r)
-    want = np.asarray(waypoints(world, lp["task"], lp["skill"], pos=lp["planned"])[0][1][:2], float)      # the hover point, unshifted
     resid = np.asarray(seen, float) - want
     lp["looks"] += 1
     if np.linalg.norm(resid) <= ALIGN_TOL:
@@ -244,9 +260,10 @@ def _align(world, r):
     if np.linalg.norm(lp["bias"]) > ALIGN_MAX or lp["looks"] >= ALIGN_LOOKS:
         bad = np.linalg.norm(lp["bias"]) > ALIGN_MAX
         if bad or np.linalg.norm(resid) > 5 * ALIGN_TOL:
-            _say(r, f"The gripper is {np.linalg.norm(lp['bias']) * 1000:.0f} mm off from where my joints say and I cannot line it up. I need to be shown.")
-            lp["attempts"] = lp["max"]
-            return _end(r) or _hold(world, r)
+            _say(r, f"I could not line the gripper up with the {name} (it looks {np.linalg.norm(lp['bias']) * 1000:.0f} mm off). Going on without.")
+            lp["bias"] = np.zeros(2)                        # a correction I cannot trust is worse than none
+            _plan_pick(world, r, stage=lp["stage"], align=False)
+            return _hold(world, r)
         _plan_pick(world, r, stage=lp["stage"], align=False)       # close enough after the last look: go with the bias found so far
         return _hold(world, r)
     if np.linalg.norm(resid) > ALIGN_SAY and lp["stage"] == 0 and lp["looks"] == 1:

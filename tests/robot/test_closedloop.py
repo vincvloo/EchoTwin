@@ -209,12 +209,19 @@ def test_a_gripper_that_cannot_be_seen_is_not_corrected_and_the_robot_says_so():
     assert "I can't see the gripper" in " ".join(r["loop"]["log"]) and not r["loop"]["bias"].any()
 
 
-def test_an_arm_too_far_off_is_not_chased_it_asks_to_be_shown():
+def test_a_reading_that_cannot_be_trusted_is_not_used():
     b, plant = _off_arm()
     b.see_tool = lambda: b.hand_pos()[:2] + np.array([0.05, 0.0])   # always 5 cm away from where it should be
     r, _ = _until_grip(b, plant, align=True)
     log = " ".join(r["loop"]["log"])
-    assert "I need to be shown" in log and r["loop"]["attempts"] == r["loop"]["max"]
+    assert "Going on without" in log and not r["loop"]["bias"].any()
+
+
+def test_only_a_tight_fit_is_worth_looking_at():
+    lay = Layout()
+    lay.props = [dict(GLASS), {"name": "cube", "shape": "box", "pos": (-0.15, 0.1), "yaw": 0.0, "size": (0.02, 0.02, 0.02), "rgb": (0.2, 0.3, 0.9)}]
+    w = World(lay)
+    assert PS._tight_fit(w, "prop_0") and not PS._tight_fit(w, "prop_1")        # a 7 cm glass in 8 cm jaws, a 4 cm cube
 
 
 def test_the_simulation_does_not_look_at_itself_and_the_switch_works():

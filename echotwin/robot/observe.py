@@ -96,5 +96,6 @@ class CameraObserver:
         plane = self.plane
         zp = z + PAD_DZ
         px = plane.to_pixel(expected_xy, zp)
-        mid = L.find_pads(self.source.frame(), px, plane.metres_to_pixels(jaw_sep_m, expected_xy, zp), axis=(np.cos(yaw), -np.sin(yaw)))   # image y points down
+        mid = L.find_pads(self.source.frame(), px, plane.metres_to_pixels(jaw_sep_m, expected_xy, zp), axis=(np.cos(yaw), -np.sin(yaw)),   # image y points down
+                          need_pair=True)       # a lone pad is a guess: too coarse to steer a gripper by
         return None if mid is None else plane.to_table(mid, zp)
