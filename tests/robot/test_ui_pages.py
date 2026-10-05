@@ -33,6 +33,6 @@ def test_the_messages_a_page_handles_are_sent_by_the_server(page):
     assert handled and handled - emitted == set(), f"{page} waits for messages nobody sends"
 
 
-@pytest.mark.parametrize("page", ["dashboard.html"])
+@pytest.mark.parametrize("page", PAGES)
 def test_a_page_uses_the_shared_style_and_stage_script(page):
     assert 'href="/ui/ui.css"' in SRC[page] and 'src="/ui/stage.js"' in SRC[page]

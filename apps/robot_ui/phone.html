@@ -1,162 +1,179 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<meta name="theme-color" content="#101418">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1216" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
 <title>Pip Controller</title>
+<link rel="stylesheet" href="/ui/ui.css">
 <style>
-:root{--bg:#101418;--card:#1a2027;--line:#2a323c;--text:#e8edf2;--dim:#8b97a5;--accent:#38d39f;--warn:#ffb547;--stop:#ff4d4f;--blue:#4c8dff}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.35 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;overscroll-behavior:none;user-select:none;-webkit-user-select:none}
+html,body{overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+button{touch-action:manipulation}
 header{display:flex;align-items:center;gap:10px;padding:12px 16px 8px}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--stop);flex:none}
-.dot.on{background:var(--accent)}
-#status{font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#said{margin:0 16px 10px;padding:10px 12px;background:var(--card);border-radius:12px;min-height:44px;color:var(--text)}
+#status{font-weight:700;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#status.stop{color:var(--stop)} #status.busy{color:var(--blue)} #status.teach{color:var(--teach)}
+#simWrap{margin:0 16px 10px;border-radius:var(--radius);overflow:hidden;background:#000;aspect-ratio:4/3}
+#sim{width:100%;height:100%;object-fit:contain;display:block}
+#said{margin:0 16px 10px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:var(--radius-sm);min-height:44px}
 #said b{color:var(--accent)}
-nav{display:flex;margin:0 16px;background:var(--card);border-radius:12px;padding:4px}
-nav button{flex:1;background:none;border:0;color:var(--dim);font:600 15px system-ui;padding:10px 0;border-radius:9px}
-nav button.on{background:var(--line);color:var(--text)}
-section{display:none;padding:14px 16px 150px}
+#reviewBar{display:none;gap:10px;margin:0 16px 10px}
+#reviewBar.on{display:flex}
+#reviewBar button{flex:1}
+nav{display:flex;margin:0 16px;background:var(--sunken);border-radius:12px;padding:4px}
+nav button{flex:1;background:none;border:0;color:var(--dim);padding:10px 0;border-radius:9px}
+nav button.on{background:var(--card);color:var(--text);box-shadow:var(--shadow)}
+nav button[hidden]{display:none}
+section{display:none;padding:14px 16px calc(120px + env(safe-area-inset-bottom))}
 section.on{display:block}
 .row{display:flex;gap:10px;margin-bottom:10px}
-.btn{flex:1;border:0;border-radius:14px;padding:16px 8px;font:600 16px system-ui;color:var(--text);background:var(--card);border:1px solid var(--line)}
-.btn:active,.btn.act{background:var(--line)}
-.btn.primary{background:var(--accent);color:#06281c;border:0}
-.btn.blue{background:var(--blue);border:0}
-.btn.warn{background:var(--warn);color:#2b1a00;border:0}
-#pad{position:relative;height:260px;border-radius:18px;background:radial-gradient(circle at 50% 50%,#22303b,#161c22 70%);border:1px solid var(--line);touch-action:none;margin-bottom:10px;overflow:hidden}
+.row>button{flex:1;padding:16px 8px;font-size:16px}
+.row>button.primary{font-size:17px}
+#pad{position:relative;height:240px;border-radius:18px;background:radial-gradient(circle at 50% 50%,var(--card),var(--sunken) 75%);border:1px solid var(--line);touch-action:none;margin-bottom:10px;overflow:hidden;user-select:none;-webkit-user-select:none}
 #pad .hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--dim);padding:20px;pointer-events:none}
-#knob{position:absolute;width:58px;height:58px;border-radius:50%;background:var(--accent);opacity:.9;left:calc(50% - 29px);top:calc(50% - 29px);box-shadow:0 0 0 6px #38d39f33;pointer-events:none;transition:opacity .2s}
+#knob{position:absolute;width:58px;height:58px;border-radius:50%;background:var(--accent);opacity:.9;left:calc(50% - 29px);top:calc(50% - 29px);box-shadow:0 0 0 6px color-mix(in srgb,var(--accent) 25%,transparent);pointer-events:none;transition:opacity .2s}
 #pad.idle #knob{opacity:.25}
 .toggle{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--card);border-radius:12px;margin-bottom:8px;border:1px solid var(--line)}
 .toggle input{width:22px;height:22px}
-#review{display:none}
-#review.on{display:flex}
-#stop{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));height:78px;border:0;border-radius:20px;background:var(--stop);color:white;font:800 26px system-ui;letter-spacing:2px;box-shadow:0 8px 30px #ff4d4f55;z-index:5}
-#stop.halted{background:#7a1f22}
-#mic{width:100%;height:120px;border-radius:20px;border:0;background:var(--blue);color:white;font:700 20px system-ui;margin-bottom:12px;touch-action:none}
+#stop{position:fixed;left:16px;right:16px;bottom:max(16px,env(safe-area-inset-bottom));height:72px;border-radius:20px;font:800 26px system-ui;letter-spacing:2px;box-shadow:0 8px 30px color-mix(in srgb,var(--stop) 40%,transparent);z-index:5}
+#stop.halted{background:var(--card);color:var(--stop);border:2px solid var(--stop);box-shadow:none;font-size:20px;letter-spacing:0}
+#mic{width:100%;height:110px;border-radius:20px;border:0;background:var(--blue);color:#fff;font:700 20px system-ui;margin-bottom:12px;touch-action:none;user-select:none;-webkit-user-select:none}
 #mic.rec{background:var(--stop)}
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.chip{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:999px;padding:9px 13px;font:14px system-ui}
-input[type=text]{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--text);padding:14px;font:16px system-ui}
-video{width:100%;border-radius:16px;background:#000;aspect-ratio:4/3;object-fit:cover;display:block;margin-bottom:10px}
+.chips{margin-top:10px}
+input[type=text]{flex:1;font-size:16px}
+#camera{width:100%;border-radius:var(--radius);background:#000;aspect-ratio:4/3;object-fit:cover;display:block;margin-bottom:10px}
 .small{color:var(--dim);font-size:13px;margin:6px 2px 12px}
-#bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:-4px 0 10px}
-#bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
-#motionBtn{display:none}
+#bar{height:6px;margin:-4px 0 10px}
+#motionBtn{display:none;width:100%;margin-bottom:10px}
 #pipe{display:none;margin:0 0 12px}
-#pipeBar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:6px 0}
-#pipeFill{display:block;height:100%;width:0;background:var(--accent);transition:width .6s}
+details{margin-bottom:10px}
+summary{cursor:pointer;color:var(--dim);font-weight:600;padding:8px 2px}
 </style>
 </head>
 <body>
 <header><div class="dot" id="dot"></div><div id="status">Connecting…</div></header>
-<div id="said">Say or type what Pip should do.</div>
+<div id="simWrap"><img id="sim" alt="The robot and your table"></div>
+<div id="said">Connecting…</div>
+<div id="reviewBar"><button class="primary" data-btn="keep">Keep demo</button><button data-btn="discard">Discard</button></div>
 <nav>
-  <button data-tab="drive" class="on">Drive</button>
-  <button data-tab="talk">Talk</button>
   <button data-tab="scan">Scan</button>
+  <button data-tab="talk" class="on">Talk</button>
+  <button data-tab="drive" hidden>Drive</button>
 </nav>
 
-<section id="drive" class="on">
-  <button class="btn warn" id="motionBtn" style="width:100%;margin-bottom:10px">Enable tilt &amp; shake</button>
-  <div id="pad" class="idle"><div class="hint" id="padHint">Hold and tilt the phone to move.<br>Or drag like a joystick.</div><div id="knob"></div></div>
+<section id="scan">
+  <div id="pipe"><div class="meter"><i id="pipeFill"></i></div><p class="small" id="pipeText"></p>
+    <div class="row"><button id="pipeSkip">Skip, use quick mode</button></div></div>
+  <video id="camera" playsinline muted autoplay></video>
+  <div class="meter" id="bar"><i id="barFill"></i></div>
+  <div class="row"><button class="primary" id="sweep">Scan the table (6 s)</button></div>
+  <p class="small">Keep the whole table in view and walk slowly round it.</p>
+  <details>
+    <summary>Other ways to scan</summary>
+    <div class="row"><button id="snap">One photo (quick mode)</button></div>
+    <div class="row"><button id="addPhoto">Add a photo</button><button id="finish" disabled>Finish (0)</button></div>
+  </details>
+  <details>
+    <summary>Teach by filming your hand</summary>
+    <p class="small">Hold the phone still with the whole table in view, tap record, move one object with your hand, keep filming 2 seconds, tap stop. <a href="/docs/teaching">How to film a demo</a></p>
+    <div class="row"><button class="blue" id="demoRec">● Record a demo</button></div>
+  </details>
+</section>
+
+<section id="talk" class="on">
+  <button id="mic">Hold to talk</button>
+  <div class="row"><input type="text" id="txt" placeholder="Put the glass next to the chocolate" enterkeyhint="send" aria-label="Tell the robot what to do"><button class="primary" style="flex:none;width:84px" id="send">Send</button></div>
+  <div class="chips" id="chips"></div>
+  <p class="small" id="micNote"></p>
+  <button class="ghost" id="driveLink">Drive by hand</button>
+</section>
+
+<section id="drive">
+  <button class="warn" id="motionBtn">Enable tilt &amp; shake</button>
+  <div id="pad" class="idle"><div class="hint" id="padHint">Drag like a joystick, or hold and tilt the phone.</div><div id="knob"></div></div>
   <div class="row">
-    <button class="btn" id="up">▲ Up</button>
-    <button class="btn" id="down">▼ Down</button>
-    <button class="btn primary" id="grip">Grip</button>
-  </div>
-  <div class="row" id="review">
-    <button class="btn primary" data-btn="keep">Keep demo</button>
-    <button class="btn" data-btn="discard">Discard</button>
+    <button id="up">▲ Up</button>
+    <button id="down">▼ Down</button>
+    <button class="primary" id="grip">Grip</button>
   </div>
   <div class="row">
-    <button class="btn blue" data-btn="robot_turn">Your turn</button>
-    <button class="btn" data-btn="human_turn">My turn</button>
-    <button class="btn" data-btn="continue">Continue</button>
+    <button data-btn="robot_turn">Pip's turn</button>
+    <button data-btn="human_turn">My turn</button>
   </div>
   <label class="toggle"><span>Shake to stop</span><input type="checkbox" id="shakeOn" checked></label>
 </section>
 
-<section id="talk">
-  <button id="mic">Hold to talk</button>
-  <div class="row"><input type="text" id="txt" placeholder="Put the glass next to the chocolate" enterkeyhint="send"><button class="btn primary" style="flex:none;width:80px" id="send">Send</button></div>
-  <div class="chips" id="chips"></div>
-  <p class="small" id="micNote"></p>
-</section>
+<button class="stop" id="stop">STOP</button>
 
-<section id="scan">
-  <div id="pipe"><div id="pipeBar"><i id="pipeFill"></i></div><p class="small" id="pipeText"></p>
-    <button class="btn" id="pipeSkip">Skip, use quick mode</button></div>
-  <video id="video" playsinline muted autoplay></video>
-  <div id="bar"><i id="barFill"></i></div>
-  <div class="row"><button class="btn primary" id="sweep">Sweep scan (6 s)</button></div>
-  <div class="row">
-    <button class="btn" id="addPhoto">Add photo</button>
-    <button class="btn" id="finish" disabled>Finish (0)</button>
-  </div>
-  <div class="row"><button class="btn" id="snap">One photo (quick mode)</button></div>
-  <p class="small">Sweep scan builds a 3D model (a few minutes, you can skip). Keep the whole table in view and hold the phone steady.</p>
-  <div class="row"><button class="btn blue" id="demoRec">● Record a demo with your hand</button></div>
-  <p class="small">Hold the phone still with the whole table in view, tap record, move one object with your hand, keep filming 2 seconds, tap stop. Pip learns from it. <a href="/docs/teaching">How to film a demo</a></p>
-</section>
-
-<button id="stop">STOP</button>
-
+<script src="/ui/stage.js"></script>
 <script>
 const $ = s => document.querySelector(s);
-let ws, connected = false, state = {};
+let ws, state = null, scanning = false, lastStage = null, driveShown = false;
 const buzz = p => { try { navigator.vibrate && navigator.vibrate(p) } catch (e) {} };
 let lastButton = 0;
 
 function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws?role=phone`);
-  ws.onopen = () => { connected = true; $('#dot').classList.add('on'); };
-  ws.onclose = () => { connected = false; $('#dot').classList.remove('on'); $('#status').textContent = 'Reconnecting…'; setTimeout(connect, 1000); };
+  ws.onopen = () => { $('#dot').classList.add('on'); };
+  ws.onclose = () => { $('#dot').classList.remove('on'); $('#status').textContent = 'Reconnecting…'; setTimeout(connect, 1000); };
   ws.onmessage = e => onMsg(JSON.parse(e.data));
 }
 function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+const esc = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+let heardSay = false;
 function onMsg(m) {
   if (m.t === 'state') { state = m; renderState(); renderChips(m.props); }
-  else if (m.t === 'say') { $('#said').innerHTML = `<b>${state.name || 'Pip'}:</b> ` + esc(m.text); }
+  else if (m.t === 'say') { heardSay = true; $('#said').innerHTML = `<b>${esc(state?.name || 'Pip')}:</b> ` + esc(m.text); }
   else if (m.t === 'haptic') buzz(m.pattern);
   else if (m.t === 'hello' && m.flags && !m.flags.shake) { $('#shakeOn').checked = false; }
-  else if (m.t === 'scan' && m.stage === 'pipeline') onPipeline(m);
-  else if (m.t === 'scan' && m.stage === 'done') { $('#said').textContent = 'Scan done. Look at the dashboard.'; }
+  else if (m.t === 'scan') onScan(m);
 }
-function onPipeline(m) {
-  const running = m.state === 'running';
-  $('#pipe').style.display = running ? 'block' : 'none';
-  $('#pipeFill').style.width = m.pct + '%';
-  if (running) $('#pipeText').textContent = `Step ${m.i + 1} of ${m.steps.length}: ${m.steps[m.i]} · ${m.elapsed} s · about ${m.pct}%`;
+function onScan(m) {
+  if (['capturing', 'receiving', 'processing', 'everyday'].includes(m.stage)) scanning = true;
+  if (m.stage === 'pipeline') {
+    const running = m.state === 'running';
+    scanning = running || m.state === 'skipped';
+    $('#pipeFill').style.width = m.pct + '%';
+    $('#pipeText').textContent = running ? `Step ${Math.min(m.i + 1, m.steps.length)} of ${m.steps.length}: ${m.steps[m.i] || 'finishing'} · ${m.elapsed} s` : 'Skipped. Using quick mode…';
+  }
+  if (m.stage === 'done' || m.stage === 'error') {
+    scanning = false;
+    if (m.stage === 'error') $('#said').textContent = 'Scan failed: ' + m.error;
+  }
+  if (state) renderState();
 }
 $('#pipeSkip').onclick = () => send({ t: 'scan_skip' });
-const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// ---------- the step decides the tab ----------
+function showTab(name) {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
+  document.querySelectorAll('section').forEach(x => x.classList.toggle('on', x.id === name));
+  const onScan = name === 'scan';
+  $('#simWrap').hidden = onScan;
+  if (onScan) { $('#sim').removeAttribute('src'); startCamera(); }
+  else if (!$('#sim').getAttribute('src')) $('#sim').src = '/video.mjpg';
+}
+const TAB_FOR = { scan: 'scan', scanning: 'scan', ask: 'talk', watch: 'talk', review: 'talk', teach: 'drive' };
 function renderState() {
-  const s = state;
-  let txt = s.halted ? `STOPPED (${s.halt_reason})` :
-    s.mode === 'teach' ? `Teaching: ${s.task?.instruction || ''}` :
-    s.mode === 'move' ? `Pip is working${s.plan ? ' · ' + s.plan.sure + '% sure' : ''}` :
-    s.mode === 'review' ? `Demo scored ${s.review?.score}. Keep it?` :
-    s.mode === 'replay' ? 'Pip is replaying your video' :
-    s.pending ? s.pending : (s.authority === 'robot' ? 'Pip has control' : 'You have control');
-  if (s.mode === 'teach' && s.recording) txt = '● REC  ' + txt;
-  $('#status').textContent = txt;
+  const s = state, st = Stage.stageOf(s, { scanning }), b = Stage.badge(s);
+  $('#status').textContent = (s.mode === 'teach' && s.recording ? '● REC  ' : '') + (s.pending || b.text);
+  $('#status').className = b.tone;
   $('#stop').classList.toggle('halted', !!s.halted);
-  $('#stop').textContent = s.halted ? 'STOPPED · tap Continue' : 'STOP';
-  $('#review').classList.toggle('on', s.mode === 'review');
+  $('#stop').textContent = s.halted ? 'STOPPED · tap to continue' : 'STOP';
+  $('#reviewBar').classList.toggle('on', s.mode === 'review');
   $('#grip').textContent = s.grip ? 'Release' : 'Grip';
   gripOn = !!s.grip;
+  $('#pipe').style.display = scanning ? 'block' : 'none';
+  if (!heardSay) $('#said').textContent = Stage.STEPS[st].title + '.';
+  const teaching = st === 'teach' || st === 'review';
+  $('nav [data-tab=drive]').hidden = !(teaching || driveShown);
+  if (st !== lastStage) {   // the step changed: open the tab that fits it
+    lastStage = st;
+    if (TAB_FOR[st]) showTab(TAB_FOR[st]);
+  }
 }
-
-// tabs
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x === b));
-  document.querySelectorAll('section').forEach(x => x.classList.toggle('on', x.id === b.dataset.tab));
-  if (b.dataset.tab === 'scan') startCamera();
-});
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+$('#driveLink').onclick = () => { driveShown = true; $('nav [data-tab=drive]').hidden = false; showTab('drive'); };
 
 // ---------- drive ----------
 let tilt = null, tilt0 = null, driving = false, padVec = null, vz = 0, gripOn = false;
@@ -187,7 +204,7 @@ function hold(el, v) {
 hold($('#up'), 0.8); hold($('#down'), -0.8);
 $('#grip').onclick = () => { lastButton = Date.now(); gripOn = !gripOn; send({ t: 'grip', on: gripOn }); buzz(gripOn ? [30, 30, 30] : 30); $('#grip').textContent = gripOn ? 'Release' : 'Grip'; };
 document.querySelectorAll('[data-btn]').forEach(b => b.onclick = () => { lastButton = Date.now(); send({ t: 'btn', name: b.dataset.btn }); buzz(20); });
-$('#stop').onclick = () => { if (state.halted) { send({ t: 'btn', name: 'continue' }); } else { send({ t: 'stop', reason: 'button' }); } buzz([200]); };
+$('#stop').onclick = () => { if (state && state.halted) { send({ t: 'btn', name: 'continue' }); } else { send({ t: 'stop', reason: 'button' }); } buzz([200]); };
 
 setInterval(() => {
   let vx = 0, vy = 0;
@@ -210,10 +227,10 @@ $('#motionBtn').onclick = async () => {
   } catch (e) { $('#motionBtn').textContent = 'Motion blocked: use the joystick'; }
 };
 
-// ---------- F5 shake to stop ----------
+// ---------- shake to stop ----------
 let peaks = [];
 window.addEventListener('devicemotion', e => {
-  if (!$('#shakeOn').checked || Date.now() - lastButton < 1000 || state.halted) return;
+  if (!$('#shakeOn').checked || Date.now() - lastButton < 1000 || (state && state.halted)) return;
   const a = e.acceleration && e.acceleration.x != null ? e.acceleration : null;
   const g = e.accelerationIncludingGravity;
   let mag;
@@ -230,7 +247,7 @@ window.addEventListener('devicemotion', e => {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, heard = '';
 if (!SR) $('#micNote').textContent = 'Speech recognition is not available in this browser. Type instead.';
-function say(text) { if (text.trim()) { send({ t: 'say', text }); $('#said').textContent = '“' + text + '”'; } }
+function say(text) { if (text.trim()) { send({ t: 'say', text }); heardSay = true; $('#said').textContent = '“' + text + '”'; } }
 function micStart(e) {
   e.preventDefault(); if (!SR) return;
   heard = ''; rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = true;
@@ -238,7 +255,7 @@ function micStart(e) {
     heard = Array.from(ev.results).map(r => r[0].transcript).join(' ');
     $('#said').textContent = '… ' + heard;
     // the stop word never waits for the end of the sentence
-    if (/\b(stop|halt|freeze)\b/i.test(heard) && !state.halted) { send({ t: 'say', text: 'stop' }); heard = ''; try { rec.stop() } catch (e) {} }
+    if (/\b(stop|halt|freeze)\b/i.test(heard) && !(state && state.halted)) { send({ t: 'say', text: 'stop' }); heard = ''; try { rec.stop() } catch (e) {} }
   };
   rec.onerror = ev => { $('#micNote').textContent = 'Mic: ' + ev.error; };
   try { rec.start(); $('#mic').classList.add('rec'); $('#mic').textContent = 'Listening… release to send'; buzz(20); } catch (e) {}
@@ -259,6 +276,7 @@ function renderChips(props) {
   const key = names.join('|');
   if (key === chipKey) return;
   chipKey = key;
+  $('#txt').placeholder = names.length ? `Put the ${names[0]} next to the ${names[1] || names[0]}` : 'Scan the table first';
   const first = names.length
     ? [`Put the ${names[0]} next to the ${names[1] || names[0]}`, names[1] ? `Move the ${names[1]} to the left` : 'Move it to the left']
     : [];
@@ -269,17 +287,17 @@ function renderChips(props) {
 }
 renderChips([]);
 
-// ---------- F3 camera + F0 scan ----------
+// ---------- camera, scan and demo ----------
 let stream = null, photos = 0;
 async function startCamera() {
   if (stream) return;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
-    $('#video').srcObject = stream;
-  } catch (e) { $('#said').textContent = 'Camera not available (' + e.name + '). Driving and talking still work.'; }
+    $('#camera').srcObject = stream;
+  } catch (e) { $('#said').textContent = 'Camera not available (' + e.name + '). Driving and talking still work.'; heardSay = true; }
 }
 function grab() {
-  const v = $('#video'); if (!v.videoWidth) return null;
+  const v = $('#camera'); if (!v.videoWidth) return null;
   const s = 1024 / Math.max(v.videoWidth, v.videoHeight);
   const c = document.createElement('canvas'); c.width = Math.round(v.videoWidth * Math.min(1, s)); c.height = Math.round(v.videoHeight * Math.min(1, s));
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
@@ -292,7 +310,7 @@ $('#sweep').onclick = async () => {
   const iv = setInterval(() => {
     const img = grab(); if (img) send({ t: 'frame', img, beta: tilt?.b });
     n++; $('#barFill').style.width = (100 * n / N) + '%'; btn.textContent = `Scanning… ${Math.ceil((N - n) / 4)} s`;
-    if (n >= N) { clearInterval(iv); send({ t: 'scan_end' }); buzz([40, 40, 40]); btn.disabled = false; btn.textContent = 'Sweep scan (6 s)'; setTimeout(() => $('#barFill').style.width = '0', 800); }
+    if (n >= N) { clearInterval(iv); send({ t: 'scan_end' }); buzz([40, 40, 40]); btn.disabled = false; btn.textContent = 'Scan the table (6 s)'; setTimeout(() => $('#barFill').style.width = '0', 800); }
   }, 250);
 };
 $('#addPhoto').onclick = async () => {
@@ -304,13 +322,13 @@ $('#addPhoto').onclick = async () => {
 $('#finish').onclick = () => { send({ t: 'scan_end' }); photos = 0; $('#finish').disabled = true; $('#finish').textContent = 'Finish (0)'; buzz([40, 40, 40]); };
 $('#snap').onclick = async () => { await startCamera(); const img = grab(); if (img) { send({ t: 'snap', img, beta: tilt?.b }); buzz(30); } };
 
-// ---------- learn from a video of your hand ----------
+// learn from a video of your hand
 let demoIv = null, demoN = 0;
 $('#demoRec').onclick = async () => {
   if (demoIv) {  // stop
     clearInterval(demoIv); demoIv = null;
     send({ t: 'demo_end', fps: 5 }); buzz([40, 40, 40]);
-    $('#demoRec').textContent = '● Record a demo with your hand'; $('#demoRec').classList.add('blue'); $('#demoRec').classList.remove('warn');
+    $('#demoRec').textContent = '● Record a demo'; $('#demoRec').classList.add('blue'); $('#demoRec').classList.remove('warn');
     $('#barFill').style.width = '0';
     return;
   }
@@ -324,6 +342,7 @@ $('#demoRec').onclick = async () => {
   }, 200);
 };
 
+showTab('talk');
 connect();
 </script>
 </body>
