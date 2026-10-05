@@ -47,3 +47,9 @@ look at the grip first: the pads need friction (1.5 or more), the closing force 
 a few millimetres above the lowest tip of the pads.
 
 Credit: the SO-ARM100 model is by The Robot Studio and Google DeepMind (MuJoCo Menagerie), Apache-2.0.
+
+## Switching the arm and the size while it runs
+
+In the dashboard, open Advanced, then Sizes and arm. The arm list shows every descriptor in `echotwin/robot/arms/` (an arm whose files are missing is greyed out until you download it); switching rebuilds the twin with the other arm and keeps the table. It takes a few seconds, and the choice is not saved: `ARM=` in `.env` is what the server starts with. Skills learned with one arm are not checked on another.
+
+Sizes: only the size of the table next to the arm matters. Type how wide one object really is (or use Pip bigger, Pip smaller) and the whole table, its objects and the camera are rescaled by one factor; the arm and the skill numbers do not change. The factor can stay between 0.2 and 5 of what the photo said. A printed marker (`docs/CAPTURE_GUIDE.md`) gives the true scale without this step.
