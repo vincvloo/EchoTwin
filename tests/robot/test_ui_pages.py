@@ -7,7 +7,6 @@ from echotwin.robot import config
 
 PAGES = ["dashboard.html", "phone.html"]
 SRC = {p: (config.STATIC / p).read_text(encoding="utf-8") for p in PAGES}
-SERVER = (config.ROOT / "echotwin" / "robot" / "server.py").read_text(encoding="utf-8")
 SERVER_SIDE = "".join(p.read_text(encoding="utf-8") for p in (config.ROOT / "echotwin" / "robot").rglob("*.py"))
 
 
@@ -22,7 +21,7 @@ def test_every_id_the_script_looks_up_exists(page):
 @pytest.mark.parametrize("page", PAGES)
 def test_the_messages_a_page_sends_are_handled_by_the_server(page):
     sent = set(re.findall(r"send\(\{\s*t:\s*'(\w+)'", SRC[page]))
-    handled = set(re.findall(r't == "(\w+)"', SERVER))
+    handled = set(re.findall(r't == "(\w+)"', SERVER_SIDE))
     assert sent and sent - handled == set(), f"{page} sends messages the server ignores"
 
 
