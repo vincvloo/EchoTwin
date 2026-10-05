@@ -185,3 +185,18 @@ def test_a_state_far_from_the_demos_cannot_blow_the_output_up():
     p["b0"] = np.zeros(K * 5, np.float32)
     out = P.ChunkPolicy(p).predict(np.ones(O.OBS_DIM))
     assert np.isfinite(out).all() and np.abs(out).max() <= P.CLIP * O.FEAT_DIM + 1e-3
+
+
+def test_loading_demos_keeps_episode_numbers_across_shards_and_limits_them(tmp_path):
+    from echotwin.robot import train_policy as TP
+    d = tmp_path / "demos"
+    d.mkdir()
+    for s, eps in enumerate(((0, 1), (2, 3))):                     # two shards of one folder; episode numbers continue
+        ep = np.repeat(eps, 5).astype(np.int32)
+        np.savez(d / f"shard_{s:04d}.npz", obs=np.zeros((10, O.OBS_DIM), np.float32), act=np.zeros((10, 5), np.float32), episode=ep,
+                 source=np.array(["sim"]))
+    obs, act, ep, w = TP.load([d])
+    assert sorted(set(ep.tolist())) == [0, 1, 2, 3]
+    assert len(set(TP.load([d], max_episodes=3)[2].tolist())) == 3
+    t = TP.chunk_targets(np.arange(10, dtype=np.float32)[:, None].repeat(5, 1), np.repeat([0, 1], 5), 4)
+    assert t.shape == (10, 4, 5) and t[3, 3, 0] == 4 and t[3, 1, 0] == 4 and t[4, 3, 0] == 4      # the last action repeats past the end of an episode

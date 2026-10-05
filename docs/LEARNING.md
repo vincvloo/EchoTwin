@@ -22,23 +22,24 @@ It outputs the tool velocity (vx, vy, vz), the grip (0 or 1) and the jaws' yaw.
 ## Make the data
 
 ```bash
-# 600 successful moves by the scripted skill; the executed motion is noisy, the recorded action is the expert's clean one (DART)
-<robot python> -m echotwin.robot.demos --n 600 --noise 0.3 --out data/policy/sim_noise
+# 600 successful moves by the scripted skill (about 4 minutes). `--noise 0.3` makes the executed motion noisy while the recorded action stays
+# the expert's (DART); in our test it did not help (docs/RESULTS.md), so the default is no noise.
+<robot python> -m echotwin.robot.demos --n 600 --out data/policy/sim_demos
 
 # the demos you recorded in the dashboard (data/robot/episodes), with their source (human, video, practice)
 <robot python> -m echotwin.robot.demos --episodes data/robot/episodes --out data/policy/my_demos
 ```
 
 Old episodes (before PR8) have no yaw and no object measurements; they are marked `legacy`, filled with zeros and still usable.
-About 1 s per move, so 600 take roughly 10 minutes.
+About 0.4 s per move, so 600 take about 4 minutes.
 
 ## Train
 
 Training needs torch, which lives in the perception environment (`PERCEPTION_PY`); the GPU is used if there is one (a 4 GB RTX 2050 is enough:
-the network has about 0.3 million weights).
+the network has about half a million weights and trains in about a minute).
 
 ```bash
-<perception python> -m echotwin.robot.train_policy data/policy/sim_noise data/policy/my_demos --human-weight 5 --out data/policy/act_lite.npz
+<perception python> -m echotwin.robot.train_policy data/policy/sim_demos data/policy/my_demos --human-weight 5 \n    --epochs 150 --hidden 512 --grip-weight 5 --out data/policy/act_lite.npz
 ```
 
 `--human-weight 5` counts your own demonstrations five times as much as the simulated ones. The result is a plain numpy `.npz` and a
@@ -56,10 +57,11 @@ shown still use the scripted skill. STOP stops the policy like any other move.
 
 ## What to expect, and what is missing
 
-The numbers are in `docs/RESULTS.md`. Things to keep in mind:
+The numbers are in `docs/RESULTS.md`: with 600 simulated demos the policy does 73 % of the 12 tasks in the simulation (the scripted skill: 94 %)
+and about 20 % on the mock arm. Things to keep in mind:
 
-- A policy trained on simulated, scripted demos copies the scripted skill; it cannot be better than its teacher, and it has no reason to work on a
-  real arm. To get there you need real teleoperated demos (and images, so that it can see), then LeRobot's ACT is the natural next tool.
+- A policy trained on simulated, scripted demos copies the scripted skill; it cannot be better than its teacher, and it does not work on the mock
+  arm (lag, encoder offsets), let alone a real one. To get there you need real teleoperated demos (and images, so that it can see), then LeRobot's ACT is the natural next tool.
 - The demo files use LeRobot's field names (`observation.state`, `action`) but are **not** a LeRobot dataset (no parquet, no metadata); no export exists.
 - The policy has no memory of what it did beyond the time since the start. If it gets stuck it stays stuck until the time limit (600 ticks, 30 s).
 - Millimetre tolerances (a 7 cm cylinder in 8.2 cm jaws) are hard to clone from a few hundred demos.

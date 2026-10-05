@@ -23,6 +23,7 @@ def load(folders, human_weight: float = 1.0, max_episodes: int | None = None):
     """(obs, act, episode id, sample weight) over all shards; episode ids are made unique across folders."""
     O, A, E, W, base = [], [], [], [], 0
     for folder in folders:
+        folder_top = 0
         for p in sorted(Path(folder).glob("shard_*.npz")):
             z = np.load(p)
             O.append(z["obs"].astype(np.float32))
@@ -33,7 +34,8 @@ def load(folders, human_weight: float = 1.0, max_episodes: int | None = None):
             per_ep = np.array([human_weight if (str(src[min(e, len(src) - 1)]) in human) else 1.0 for e in ep])   # "sim" shards carry one source
             E.append(ep + base)
             W.append(per_ep)
-            base += int(ep.max()) + 1
+            folder_top = max(folder_top, int(ep.max()) + 1)       # episode numbers continue across the shards of one folder
+        base += folder_top
     if not O:
         raise SystemExit("no shard_*.npz found: run echotwin.robot.demos first")
     O, A, E, W = np.concatenate(O), np.concatenate(A), np.concatenate(E), np.concatenate(W).astype(np.float32)
