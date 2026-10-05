@@ -125,9 +125,10 @@ ALIGN_CLEARANCE = 0.012   # only look at the gripper when the object fits the ja
 
 
 def align_on(world, env=None) -> bool:
-    """ALIGN=on|off|auto: look at the gripper and line it up before going down. auto: on for an arm that can see itself (the real/mock arm)."""
-    v = ((os.environ if env is None else env).get("ALIGN") or "auto").strip().lower()
-    return v == "on" or (v == "auto" and getattr(world, "name", "sim") == "real")
+    """ALIGN=on|off: look at the gripper and line it up before going down (only for a tight fit, only with a camera that sees the gripper).
+    Off unless asked for: in our tests it helps a tall cylinder only when the arm is badly off (docs/RESULTS.md)."""
+    v = ((os.environ if env is None else env).get("ALIGN") or "off").strip().lower()
+    return v == "on" and hasattr(world, "see_tool")
 
 
 def _tight_fit(world, me: str) -> bool:

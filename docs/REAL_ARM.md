@@ -68,7 +68,7 @@ the scan, so with `CLOSED_LOOP` on (the default for a real arm) every move looks
    the twin's jaws stop on the object; jaws that go further met nothing), after the lift that it is still held, and at the end it looks again.
 4. A failed check opens the jaws, lifts, parks and looks again: at most 2 retries, then it asks to be shown.
 
-**Lining the gripper up (`ALIGN`).** Joint readings are never exact: an encoder that is a degree off puts the tool a centimetre away from where
+**Lining the gripper up (`ALIGN=on`, off by default).** Joint readings are never exact: an encoder that is a degree off puts the tool a centimetre away from where
 the arm thinks it is. Before the descent the robot therefore looks at the gripper itself: at the hover over the object, just above it, and at
 the grip height it finds the two pads in the camera image (the darkest compact things near the tool, about a jaw opening apart), takes the
 midpoint, compares it with where the joints say the tool is, and moves the pick by the difference (up to 3 looks per level). If the gripper

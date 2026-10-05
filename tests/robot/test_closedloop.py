@@ -227,6 +227,6 @@ def test_only_a_tight_fit_is_worth_looking_at():
 def test_the_simulation_does_not_look_at_itself_and_the_switch_works():
     w = World(_layout())
     assert not PS.align_on(w, {}) and PS.align_on(w, {"ALIGN": "on"}) and not PS.align_on(_off_arm()[0], {"ALIGN": "off"})
-    assert PS.align_on(_off_arm()[0], {})
+    assert not PS.align_on(_off_arm()[0], {}) and PS.align_on(_off_arm()[0], {"ALIGN": "on"})              # off unless asked for
     wps, lp = PS.loop_start(w, {"object": "prop_0", "name": "cube", "goal": GOAL, "h": 0.025}, dict(PS.DEFAULTS))
     assert lp["align"] is False
