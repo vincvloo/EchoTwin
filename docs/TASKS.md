@@ -45,6 +45,7 @@ In this order. Each step is only meaningful once the one before it is solid.
       arm is badly off, so it is off by default. Open: a better measurement of the tool (a mark on the hand, a side view).
 
 ## Open, not scheduled
-- [ ] A non-YOLO detector (OWLv2, Grounding DINO: permissive licences, would also remove the AGPL dependency); small
+- [x] A non-YOLO detector test (OWLv2, Grounding DINO: Apache-2.0): neither beats YOLOE with the public vocabulary and both are slower
+      (`docs/RESULTS.md`). Open: a mask source (box as mask, or SAM) if the AGPL dependency must go; small
       tabletop objects are still named wrongly by every detector tested (`docs/RESULTS.md`).
 - [ ] The MobileCLIP2 text encoder licence (Apple) should be checked before any commercial use.

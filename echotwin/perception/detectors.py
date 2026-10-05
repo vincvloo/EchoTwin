@@ -34,6 +34,13 @@ def split(spec: str) -> tuple[str, str | None]:
     return spec, None
 
 
+def licence(spec: str) -> str:
+    """The licence of the model behind a spec: the Hugging Face detectors are Apache-2.0, Ultralytics models AGPL-3.0."""
+    from . import hf_detectors
+    head = split(spec)[0]
+    return hf_detectors.FAMILIES[head]["licence"] if hf_detectors.is_hf(head) else "AGPL-3.0"
+
+
 def prompt_set(name: str) -> list[str]:
     """Names to ask for. 'catalog' | 'coco' | 'objects365' | 'lvis' | path of a text file (one name per line)."""
     if name == "catalog":
@@ -86,6 +93,9 @@ def load(spec: str, prompts=None, download: bool = False):
     if spec == "auto":
         spec = best_available()
     weights, vocab = split(spec)
+    from . import hf_detectors
+    if hf_detectors.is_hf(weights):                    # OWLv2, Grounding DINO: boxes and names, no Ultralytics
+        return hf_detectors.HFDetector(weights, list(prompts or prompt_set(vocab or "objects365")), download=download)
     path = weights_path(spec)
     if not path.exists() and not download and spec != FALLBACK:
         raise SystemExit(f"{path} is missing. Put the file there, or run again with --download.")
