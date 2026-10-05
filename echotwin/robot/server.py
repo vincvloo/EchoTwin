@@ -133,6 +133,7 @@ async def voice_file(name: str):
 
 app.mount("/scans", StaticFiles(directory=config.SCANS), name="scans")
 app.mount("/img", StaticFiles(directory=config.STATIC / "img"), name="img")     # pictures used by the pages
+app.mount("/ui", StaticFiles(directory=config.STATIC / "ui"), name="ui")        # shared style and script of both pages
 
 
 check_store: dict[str, bytes] = {}
