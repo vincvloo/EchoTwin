@@ -76,6 +76,21 @@ class MockDriver(Driver):
         self.plant: World | None = None
         self._build()
 
+    # what a randomised arm may be like: (low, high) of each parameter
+    RANGES = {"lag": (0.25, 0.65), "mass_scale": (1.0, 1.8), "friction_scale": (0.6, 1.0), "encoder_offset": (0.0, 0.03),
+              "encoder_noise": (0.0005, 0.003)}
+
+    @classmethod
+    def randomized(cls, layout, arm=None, rng=None, scale: float = 1.0) -> "MockDriver":
+        """A mock arm with parameters drawn at random: the training data for a policy that must work on an arm that is not the simulation
+        (domain randomisation). `scale` widens (>1) or narrows (<1) every range around its middle."""
+        rng = rng or np.random.default_rng()
+        p = {}
+        for k, (lo, hi) in cls.RANGES.items():
+            mid, half = (lo + hi) / 2, (hi - lo) / 2 * scale
+            p[k] = float(max(1e-4, rng.uniform(mid - half, mid + half)))
+        return cls(layout, arm, seed=int(rng.integers(1 << 31)), **p)
+
     def _build(self):
         self.plant = World(self.layout, self.arm)
         m = self.plant.model
