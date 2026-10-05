@@ -293,6 +293,10 @@ class World:
         """Look at an object: its table position (x, y), or None when it cannot be seen. The simulation is its own truth."""
         return self.obj_pos(name)[:2].copy()
 
+    def see_tool(self):
+        """Where the tool really is, by looking: the simulation's joints are exact, so it is where they say."""
+        return self.hand_pos()[:2].copy()
+
     def set_obj_pose(self, name: str, xy, d=None):
         """Move an object to (x, y) at its current height: used to correct what the robot believes. Velocity is cleared."""
         d = d if d is not None else self.data

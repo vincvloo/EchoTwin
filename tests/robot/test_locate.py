@@ -81,3 +81,50 @@ def test_homography_map_round_trip():
     H = np.array([[600.0, 40.0, 320.0], [-30.0, 590.0, 400.0], [0.02, 0.1, 1.0]])
     pm = L.PlaneMap.from_homography(H)
     assert pm.to_table(pm.to_pixel((0.12, 0.34))) == pytest.approx((0.12, 0.34), abs=1e-9)
+
+
+# ---------------- the gripper's pads ----------------
+def gripper(img, centre, sep=60, pad=(8, 22)):
+    """Two dark pads `sep` px apart, a lighter hand body between them, as seen from above."""
+    cx, cy = centre
+    cv2.rectangle(img, (cx - 28, cy - 16), (cx + 28, cy + 16), (140, 125, 120), -1)
+    for sx in (-1, 1):
+        x = cx + sx * sep // 2
+        cv2.rectangle(img, (x - pad[0] // 2, cy - pad[1] // 2), (x + pad[0] // 2, cy + pad[1] // 2), (45, 45, 45), -1)
+
+
+def test_the_pads_midpoint_is_found_even_when_the_joints_are_a_centimetre_off():
+    img = table()
+    gripper(img, (300, 230))
+    got = L.find_pads(img, (312, 222), 60)                  # the joints say (312, 222); the gripper is really at (300, 230)
+    assert got is not None and np.hypot(got[0] - 300, got[1] - 230) < 1.5
+
+
+def test_a_single_dark_blob_is_not_a_gripper():
+    img = table()
+    cv2.rectangle(img, (296, 220), (304, 240), (45, 45, 45), -1)
+    assert L.find_pads(img, (300, 230), 60) is None
+
+
+def test_two_dark_blobs_at_the_wrong_distance_are_not_the_pads():
+    img = table()
+    for x in (270, 340):                                    # 70 px apart where 60 are expected is allowed; 140 is not
+        cv2.rectangle(img, (x - 4, 220), (x + 4, 240), (45, 45, 45), -1)
+    assert L.find_pads(img, (305, 230), 60) is not None
+    img2 = table()
+    for x in (230, 370):
+        cv2.rectangle(img2, (x - 4, 220), (x + 4, 240), (45, 45, 45), -1)
+    assert L.find_pads(img2, (300, 230), 60) is None
+
+
+def test_the_hand_body_and_the_table_are_not_pads():
+    img = table()
+    cv2.rectangle(img, (272, 214), (328, 246), (140, 125, 120), -1)         # only the hand: lighter than the pads
+    assert L.find_pads(img, (300, 230), 60) is None
+
+
+def test_dark_coloured_blocks_are_not_pads():
+    img = table()
+    for x in (270, 330):
+        cv2.rectangle(img, (x - 4, 220), (x + 4, 240), (200, 90, 30), -1)      # dark saturated blue: as dark as a pad in grey, not neutral
+    assert L.find_pads(img, (300, 230), 60) is None

@@ -233,3 +233,36 @@ What this says:
 
 Limits: simulated demos from one scripted teacher, no images, no real robot, 12 trials per cell (one failure is 8 points), one training run
 per row (no seeds averaged).
+
+## Does looking at the gripper fix the tight fit? (PR14)
+
+The tall cylinder (7 cm in 8.2 cm jaws, 6 mm to spare on each side) is the weakest skill because the arm is about a centimetre off.
+With `ALIGN=on` the robot looks at its own gripper before going down: at the hover over the object, just above it, and at the grip
+height it finds the two pads in the camera image, compares their midpoint with where the joints say the tool is, and moves the pick by the
+difference (`find_pads`, `observe_tool`, the `align` step of the closed loop). Only for a tight fit (under 12 mm to spare per side). Mock arm,
+closed loop with and without the alignment, same objects and spots, judged on the mock arm's own world:
+
+| Mock arm, cylinder cells | closed loop | + align |
+|---|---|---|
+| encoder error 0.7 degrees per joint (the default), 6 trials per cell | 67 % / 50 % / 83 % | 83 % / 0 % / 67 % |
+| 1.1 degrees per joint, 12 trials per cell | 17 % / 42 % / 50 % (36 % all) | 25 % / 17 % / 50 % (31 % all) |
+| 1.7 degrees per joint, 12 trials per cell | 25 % / 25 % / 42 % (31 % all) | 33 % / 42 % / 67 % (47 % all) |
+
+(next to / to the left / on top of.) Every other shape is unchanged by construction: a loose fit is not aligned (the whole table at the default
+error: 79 % without, 75 % with, the difference is the cylinder cells).
+
+What this says:
+
+- **It halves the position error but does not make the tight fit reliable.** With the gripper over the cylinder at the grip height, the
+  distance between the pads' midpoint and the object's centre is 3.7 mm on average with the alignment against 6.8 mm without (6 arms, one
+  encoder error each; the unaligned error ranges from 2 to 10 mm). The jaws allow 6 mm.
+- **It pays off only when the arm is badly off.** At 1.7 degrees per joint the cylinder improves from 31 % to 47 %; at the default error and
+  at 1.1 degrees the results are within noise (12 trials per cell: one trial is 8 points) or worse in a cell. The alignment is off by default.
+- **The limit is the measurement.** Seen from above the pads give the tool position within 2 mm on average, 6 mm at the 90th percentile and
+  9 mm at worst; near the base the forearm hides a pad, and a lone pad is not used. With 6 mm of clearance and 2 to 6 mm of measurement
+  error there is little left to gain. A better measurement (a mark on the hand, a second camera, or looking from the side) is the next step,
+  not a better controller.
+- **Three things went wrong on the way**, and are fixed: the first version measured the gripper before the arm had arrived at the hover and
+  "corrected" 4 cm of travel (success fell from 79 % to 49 %); it took dark blue boxes for pads; and it aligned objects that fit loosely.
+
+Limits: one camera model (a clean render), the jaws of the built-in arm, the mock arm's encoder error as a random offset per joint.

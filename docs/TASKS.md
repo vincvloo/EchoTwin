@@ -40,6 +40,10 @@ In this order. Each step is only meaningful once the one before it is solid.
       demos, randomising the simulation so it carries to an arm that lags, ACT proper (LeRobot). The demo files only use LeRobot's
       field names; they are not a LeRobot dataset and no export exists.
 
+- [x] **PR14 Visual servoing.** The robot can look at its own gripper (`find_pads`, `ALIGN=on`) and line it up with the object before
+      going down. Result (`docs/RESULTS.md`): the position error at the grip halves (6.8 to 3.7 mm) but the tall cylinder improves only when the
+      arm is badly off, so it is off by default. Open: a better measurement of the tool (a mark on the hand, a side view).
+
 ## Open, not scheduled
 - [ ] A non-YOLO detector (OWLv2, Grounding DINO: permissive licences, would also remove the AGPL dependency); small
       tabletop objects are still named wrongly by every detector tested (`docs/RESULTS.md`).

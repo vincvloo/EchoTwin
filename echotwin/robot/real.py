@@ -136,6 +136,14 @@ class RealBackend:
             tw.set_obj_pose(name, est)
         return est
 
+    def see_tool(self):
+        """Where the tool really is, by looking at the gripper, or None if the camera does not see it. Without a camera: where the joints say."""
+        here = self.hand_pos()
+        if self.camera is None:
+            return here[:2].copy()
+        sep = (self.twin.arm.max_opening or 0.08) + 0.01          # between the pad centres
+        return self.camera.observe_tool(here[:2], here[2], sep, self.twin.hand.yaw)
+
     def obj_pos(self, name, d=None):
         if d is None and self.observer is not None:
             return self.observer.obj_pos(name)
