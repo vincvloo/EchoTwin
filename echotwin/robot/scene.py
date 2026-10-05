@@ -109,11 +109,11 @@ def build_xml(layout: Layout) -> str:
         alpha = 0.6 if shape == "cylinder" else 1
         if pr.get("mesh_texture"):
             prop_assets.append(f'<texture name="skin_{i}" type="2d" file="{pr["mesh_texture"].replace(chr(92), "/")}"/>'
-                               f'<material name="skin_{i}" texture="skin_{i}" rgba="1 1 1 1"/>')
+                               f'<material name="skin_{i}" texture="skin_{i}" rgba="1 1 1 1" specular="0.15" shininess="0.1"/>')
             look = f'material="skin_{i}"'
         elif pr.get("skin") and not pr.get("mesh"):
             prop_assets.append(_skin_texture(i, pr["skin"]) +
-                               f'<material name="skin_{i}" texture="skin_{i}" rgba="1 1 1 {alpha}"/>')
+                               f'<material name="skin_{i}" texture="skin_{i}" rgba="1 1 1 {alpha}" specular="0.15" shininess="0.1"/>')
             look = f'material="skin_{i}"'
         else:
             look = f'rgba="{_f(r, g, b)} {alpha}"'
