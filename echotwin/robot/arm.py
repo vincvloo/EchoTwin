@@ -123,6 +123,19 @@ def list_arms() -> list[str]:
     return sorted(p.stem for p in ARMS_DIR.glob("*.json"))
 
 
+def describe_arms() -> list[dict]:
+    """The arms that can be chosen: [{name, about, ready}]. `ready` is False when files must be downloaded first."""
+    out = []
+    for name in list_arms():
+        try:
+            arm = load(name)
+            about = json.loads(arm.source.read_text(encoding="utf-8")).get("about", "")
+            out.append({"name": name, "about": about, "ready": not arm.missing_files()})
+        except (ArmError, OSError, ValueError):
+            continue
+    return out
+
+
 def load(name: str | None = None) -> ArmSpec:
     """An arm by name (echotwin/robot/arms/<name>.json), by path, or 'auto' (the ARM variable, else builtin)."""
     name = (name or os.environ.get("ARM") or "auto").strip()

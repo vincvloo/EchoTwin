@@ -29,6 +29,28 @@ class Layout:
                       [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles],
                       tuple(self.table_half))
 
+    def scaled(self, k: float) -> "Layout":
+        """The whole scene k times bigger (or smaller): table, objects, furniture, scanned meshes and the phone's camera.
+        The arm is not touched, so this is also "the arm k times smaller". `meta["scale"]` keeps the product so far."""
+        lay = self.copy()
+        lay.table_half = tuple(v * k for v in self.table_half)
+        for p in lay.props:
+            p["size"] = tuple(v * k for v in p["size"])
+            p["pos"] = tuple(v * k for v in p["pos"])
+            if p.get("mesh_scale"):
+                p["mesh_scale"] = tuple(v * k for v in p["mesh_scale"])
+        for o in lay.obstacles:
+            o["size"] = tuple(v * k for v in o["size"])
+            o["pos"] = tuple(v * k for v in o["pos"])
+        for m in lay.scene:
+            m["scale"] = m.get("scale", 1.0) * k
+            if m.get("pos") is not None:
+                m["pos"] = tuple(v * k for v in m["pos"])
+        if lay.view:
+            lay.view = {**lay.view, "pos": [v * k for v in lay.view["pos"]]}
+        lay.meta["scale"] = round(float(self.meta.get("scale", 1.0)) * k, 6)
+        return lay
+
 
 DENSITY = 300.0     # kg/m3, everyday objects are mostly hollow or light
 

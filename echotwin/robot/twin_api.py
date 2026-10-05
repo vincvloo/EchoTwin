@@ -5,6 +5,7 @@ import pathlib
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse, Response
 
+from . import arm as A
 from . import config
 from . import twin_import as TI
 from .features.everyday import listing
@@ -103,3 +104,41 @@ async def twin_mesh(file: UploadFile = File(...), target: str = Form("scene")):
         sim.submit(sim.say, str(e))
         return JSONResponse({"ok": False, "error": str(e)})
     return JSONResponse({"ok": True, "faces": info["faces"]})
+
+
+@router.post("/api/twin/scale")
+async def twin_scale(body: dict):
+    """Rescale the twin: {"factor": 0.5} or {"object": i, "width_cm": 8} (that object is really 8 cm wide)."""
+    try:
+        if body.get("width_cm") is not None:
+            i = int(body.get("object", 0))
+            now = 2 * sim.world.layout.props[i]["size"][0] * 100
+            k = float(body["width_cm"]) / now
+        else:
+            k = float(body["factor"])
+    except (KeyError, ValueError, TypeError, IndexError, ZeroDivisionError):
+        return JSONResponse({"ok": False, "error": "Give an object and its real width in cm, or a factor."})
+    lo, hi = sim.SCALE_RANGE
+    total = float(sim.base_layout.meta.get("scale", 1.0)) * k
+    if not k > 0 or not lo <= total <= hi:
+        return JSONResponse({"ok": False, "error": f"That would make the table {total:.2f} times its real size; the limit is {lo} to {hi}."})
+    sim.submit(sim.set_scale, k)
+    return JSONResponse({"ok": True, "factor": round(k, 4), "scale": round(total, 4)})
+
+
+@router.get("/api/arms")
+async def arms():
+    return JSONResponse({"arms": A.describe_arms(), "current": sim.world.arm.name if hasattr(sim.world, "arm") else None,
+                         "can_switch": sim.world.name == "sim"})
+
+
+@router.post("/api/arm")
+async def arm_switch(body: dict):
+    known = {a["name"]: a for a in A.describe_arms()}
+    a = known.get(str(body.get("name", "")))
+    if a is None:
+        return JSONResponse({"ok": False, "error": "No such arm."})
+    if not a["ready"]:
+        return JSONResponse({"ok": False, "error": f"Fetch it first: python -m echotwin.robot.arm --download {a['name']}"})
+    sim.submit(sim.set_arm, a["name"])
+    return JSONResponse({"ok": True})

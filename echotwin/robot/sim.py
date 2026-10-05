@@ -11,6 +11,7 @@ import traceback
 import numpy as np
 
 from . import answers
+from . import arm as A
 from . import backend as BK
 from . import policy as POL
 from . import config
@@ -139,6 +140,37 @@ class Sim:
         self.base_layout = layout.copy()
         self.scan = summary
         self.say(summary["greeting"])
+
+    SCALE_RANGE = (0.2, 5.0)
+
+    def set_scale(self, k: float, line: str | None = None):
+        """The twin k times bigger or smaller (the arm stays): when the sizes the photo gave are wrong, or to make Pip
+        look bigger (k below 1) or smaller (k above 1) next to the table."""
+        if self.world.name != "sim":
+            return self.say("I can only rescale the simulation, not the real arm's twin.")
+        lo, hi = self.SCALE_RANGE
+        now = float(self.base_layout.meta.get("scale", 1.0))
+        if not lo <= now * k <= hi:
+            return self.say(f"That would make the table {now * k:.2f} times its real size. I stay between {lo} and {hi}.")
+        self._abort()
+        self.base_layout = self.base_layout.scaled(k)
+        self._rebuild(self.base_layout)
+        self.say(line or f"Sizes changed by {k:.2f}. The table is now {self.base_layout.meta['scale']:.2f} times what the photo said.")
+
+    def set_arm(self, name: str):
+        """Change the robot arm (a descriptor in echotwin/robot/arms or a path). The table stays as it is."""
+        if self.world.name != "sim":
+            return self.say("I can only change the arm of the simulation.")
+        old = self.world.arm
+        try:
+            self.world.arm = A.load(name)
+            self._abort()
+            self._rebuild(self.base_layout)
+        except (A.ArmError, ValueError) as e:
+            self.world.arm = old
+            self.log("system", f"Could not use that arm: {e}")
+            return self.say("I couldn't use that arm. I keep the one I have.")
+        self.say(f"Now I have the {self.world.arm.name} arm.")
 
     def name_props(self, props: list[dict], line: str):
         """The AI named the everyday objects (and their shapes) after the twin was already shown."""
@@ -463,6 +495,7 @@ class Sim:
                        "h": pr["size"][2]} for i, pr in enumerate(w.layout.props)],
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
+            "arm": w.arm.name if hasattr(w, "arm") else None, "scale": float(self.base_layout.meta.get("scale", 1.0)),
             "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready(), "policy": self.policy is not None},
             "attempt": ((self.replay or {}).get("loop") or {}).get("attempts", 0) + 1 if self.mode == "move" and (self.replay or {}).get("loop") else None,
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,

@@ -166,7 +166,7 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
         <div><div class="eyebrow">Pip sees</div><div class="chips" id="seen" style="margin-top:8px"></div></div>
         <div><div class="eyebrow">Try saying</div><div class="chips" id="ideas" style="margin-top:8px"></div></div>
         <p class="dim small" id="calNote"></p>
-        <div class="actions"><button class="ghost" id="rescanBtn">Scan a different table</button></div>
+        <div class="actions"><button class="ghost" id="fixSizes">Fix sizes</button><button class="ghost" id="rescanBtn">Scan a different table</button></div>
       </div>
 
       <div class="panel" id="p-watch" hidden>
@@ -251,6 +251,23 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
       <div id="twinRow"><img id="twin" alt="" hidden><div></div></div>
       <table id="dets" style="margin-top:10px"></table>
       <div class="btns" style="margin-top:10px"><button class="ghost" id="capinfoBtn" aria-haspopup="dialog">Photos, Scaniverse or LiDAR?</button></div>
+    </div>
+    <div class="card wide" id="sizeCard">
+      <h3>Sizes and arm</h3>
+      <p class="dim small" style="margin:0 0 10px">Sizes from photos are estimates. Say how wide one object really is and the whole table is rescaled to match. Making Pip bigger or smaller is the same thing: the table shrinks or grows next to the arm.</p>
+      <div class="btns">
+        <select id="sizeObj" aria-label="Which object"></select>
+        <input type="number" id="sizeCm" step="0.5" min="0.5" placeholder="real width, cm" style="width:150px" aria-label="Its real width in centimetres">
+        <button class="primary" id="sizeApply">Rescale</button>
+        <button id="pipBigger" title="Pip looks 25 % bigger: the table gets smaller">Pip bigger</button>
+        <button id="pipSmaller" title="Pip looks 20 % smaller: the table gets bigger">Pip smaller</button>
+      </div>
+      <p class="dim small" id="scaleNow" style="margin:8px 0 14px"></p>
+      <div class="btns">
+        <select id="armSel" aria-label="Robot arm"></select>
+        <button id="armApply">Switch arm</button>
+      </div>
+      <p class="dim small" id="armAbout" style="margin:8px 0 0"></p>
     </div>
     <div class="card wide">
       <h3>Twin editor</h3>
@@ -423,6 +440,7 @@ function renderState() {
   const b = Stage.badge(s), badge = $('#badge');
   badge.textContent = b.text; badge.className = b.tone;
   $('#ctrl').textContent = s.authority === 'robot' ? s.name : 'You';
+  showScale(s);
   $('#stepTitle').textContent = st === 'ask' && s.name ? `Say what ${s.name} should move` : step.title;
   $('#stepNo').innerHTML = step.n ? `Step ${Math.min(step.n, 4)} of 4` : '&nbsp;';
   document.querySelectorAll('#stepDots i').forEach((d, i) => { d.className = step.n && i + 1 < step.n ? 'done' : step.n === i + 1 ? 'now' : ''; });
@@ -674,6 +692,47 @@ setInterval(() => {
     `<kbd>${L('KeyQ')}</kbd>/<kbd>${L('KeyE')}</kbd> or <kbd>PgDn</kbd>/<kbd>PgUp</kbd> down/up · <kbd>Space</kbd> grip · <kbd>Esc</kbd> stop`;
 })();
 
+// ---------- sizes and arm ----------
+function showScale(s) {
+  const k = s.scale || 1;
+  $('#scaleNow').textContent = Math.abs(k - 1) < 0.005 ? 'Sizes are as the photo said.' : `The table is ${k.toFixed(2)} times what the photo said (Pip looks ${(1 / k).toFixed(2)} times its first size).`;
+  if (s.arm && $('#armSel').value !== s.arm && document.activeElement !== $('#armSel')) $('#armSel').value = s.arm;
+}
+function fillSizeObjects() {
+  if (!twinDoc) return;
+  const keep = $('#sizeObj').value;
+  $('#sizeObj').innerHTML = twinDoc.objects.map((o, i) => `<option value="${i}">${i + 1} · ${esc(o.name)} (now ${o.size_cm[0]} cm wide)</option>`).join('') || '<option value="">No objects</option>';
+  if (keep !== '' && twinDoc.objects[+keep]) $('#sizeObj').value = keep;
+}
+async function rescale(body, done) {
+  const r = await api('/api/twin/scale', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r) return;
+  if (!r.ok) return toast(r.error, 'bad');
+  toast(done); setTimeout(loadTwin, 800);
+}
+$('#sizeApply').onclick = () => {
+  const w = parseFloat($('#sizeCm').value);
+  if (!(w > 0)) return toast('Type the real width of the object in cm.', 'bad');
+  rescale({ object: +$('#sizeObj').value, width_cm: w }, 'Sizes updated.');
+};
+$('#pipBigger').onclick = () => rescale({ factor: 0.8 }, 'Pip looks bigger.');
+$('#pipSmaller').onclick = () => rescale({ factor: 1.25 }, 'Pip looks smaller.');
+$('#fixSizes').onclick = () => { $('#adv').open = true; $('#sizeCard').scrollIntoView({ behavior: 'smooth' }); };
+let armList = [];
+fetch('/api/arms').then(r => r.json()).then(r => {
+  armList = r.arms;
+  $('#armSel').innerHTML = armList.map(a => `<option value="${esc(a.name)}" ${a.ready ? '' : 'disabled'}>${esc(a.name)}${a.ready ? '' : ' (download first)'}</option>`).join('');
+  if (r.current) $('#armSel').value = r.current;
+  $('#armSel').disabled = $('#armApply').disabled = !r.can_switch;
+  showArmAbout();
+}).catch(() => {});
+function showArmAbout() { const a = armList.find(a => a.name === $('#armSel').value); $('#armAbout').textContent = a ? a.about : ''; }
+$('#armSel').onchange = showArmAbout;
+$('#armApply').onclick = async () => {
+  const r = await api('/api/arm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#armSel').value }) });
+  if (r && !r.ok) toast(r.error, 'bad'); else if (r) toast('Switching arm… this takes a few seconds.');
+};
+
 // ---------- twin editor ----------
 let twinDoc = null;
 const SHAPES = ['flat', 'box', 'cylinder', 'round'];
@@ -695,6 +754,7 @@ function renderTwin() {
     d.scene.map((m, k) => `<tr data-k="${k}"><td>${esc(m.mesh.split('/').pop())}</td><td>${num(m.pos_cm[0])}</td><td>${num(m.pos_cm[1])}</td>
       <td>${num(m.pos_cm[2])}</td><td>${num(m.euler_deg[2])}</td><td><input type="number" step="0.05" value="${m.scale}"></td>
       <td><button data-sdel="${k}" aria-label="Delete 3D scan ${k + 1}">✕</button></td></tr>`).join('') : '';
+  fillSizeObjects();
   $('#meshTarget').innerHTML = '<option value="scene">as the room / table (scenery)</option>' +
     d.objects.map((o, i) => `<option value="${i}">as the shape of ${esc(o.name)}</option>`).join('');
   $('#twinTable').querySelectorAll('[data-del]').forEach(b => b.onclick = () => { collectTwin(); twinDoc.objects.splice(+b.dataset.del, 1); renderTwin(); });
