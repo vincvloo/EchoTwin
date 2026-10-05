@@ -306,7 +306,7 @@ class Sim:
         self.replay = {"wps": wps, "i": 0, "speed": skill["speed"], "task": task, "yaw": w.grasp_yaw(task["object"]), "loop": loop,
                        "before": {k: w.obj_pos(k)[:2].copy() for k in w.things()}}
         if self.policy is not None:
-            self.replay["policy"] = POL.LearnedExecutor(self.policy, task)
+            self.replay["policy"] = POL.LearnedExecutor(self.policy, task, world=self.world)
         self.mode, self.authority = "move", "robot"
         self.emit({"t": "decision", "kind": "do", "task": task, "uncertainty": round(u, 2), "sure": T.percent_sure(u),
                    "parts": skill["parts"], "why": why})

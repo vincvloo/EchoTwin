@@ -88,7 +88,10 @@ def from_env(env=None) -> tuple["ChunkPolicy | None", str]:
 class LearnedExecutor:
     """Drives one move with a policy. `action(world)` has the contract of `prop_skills.waypoint_action`: an action, or None when done."""
 
-    def __init__(self, policy: ChunkPolicy, task: dict, max_ticks: int = MAX_TICKS):
+    def __init__(self, policy: ChunkPolicy, task: dict, max_ticks: int | None = None, world=None):
+        """`max_ticks`: the time limit; by default longer for an arm that moves at half speed (a real or mock arm)."""
+        if max_ticks is None:
+            max_ticks = 2 * MAX_TICKS if getattr(world, "name", "sim") == "real" else MAX_TICKS
         self.policy, self.task, self.max_ticks = policy, task, max_ticks
         self.policy.reset()
         self.t, self.done_for = 0, 0
