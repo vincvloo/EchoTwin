@@ -14,6 +14,17 @@ from .hub import brain, sim
 from .net import all_ips, ensure_cert, lan_ip
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def revalidate_pages(request, call_next):
+    """Pages, styles and scripts change with every update: the browser must ask the server (a 304 is cheap), not reuse a copy."""
+    response = await call_next(request)
+    if not request.url.path.startswith(("/video.mjpg", "/voice/", "/scans/", "/img/")):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 for module in (scan_api, twin_api, demo_api, ws):
     app.include_router(module.router)
 
