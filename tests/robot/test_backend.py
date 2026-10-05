@@ -118,13 +118,14 @@ def test_run_log_records_backend_class_and_outcome(tmp_path):
 
 def test_a_finished_move_is_logged(monkeypatch, tmp_path):
     from echotwin.robot import runlog
+    from echotwin.robot.features import prop_skills as PS
     s = _sim(monkeypatch, "sim", tmp_path)
     lay = Layout()
     lay.props = [{"name": "cube", "shape": "box", "pos": (0.0, -0.05), "yaw": 0.0, "size": (0.025, 0.02, 0.025), "rgb": (0.8, 0.3, 0.3)},
                  {"name": "mark", "shape": "box", "pos": (0.2, 0.0), "yaw": 0.0, "size": (0.02, 0.02, 0.02), "rgb": (0.2, 0.3, 0.8)}]
     s._rebuild(lay)
     s.base_layout = s.world.layout.copy()
-    task, goal, o = s._make_prop_task({"prop": 0, "goal": ("near", 1, "next to")}, "put the cube next to the mark")
+    task = PS.make_task(s.world, {"prop": 0, "goal": ("near", 1, "next to")}, "put the cube next to the mark")
     s.mode, s.authority = "move", "robot"
     s.replay = {"task": task, "before": {k: s.world.obj_pos(k)[:2].copy() for k in s.world.things()}}
     s._replay_done()

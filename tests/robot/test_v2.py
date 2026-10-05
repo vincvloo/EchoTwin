@@ -215,3 +215,12 @@ def test_practice_and_stacking(sim):
     assert said()[-1] == "Done." or "Can you show me" in said()[-1], said()[-2:]
     if said()[-1] == "Done.":
         assert choc[2] > case[2], (choc, case)
+
+
+def test_numbered_names_are_told_apart():
+    """Quick mode names objects "object 1", "object 2": "move object 2" must not pick object 1."""
+    from echotwin.robot.features import move_things as MT
+    props = [{"name": "object 1"}, {"name": "object 2"}, {"name": "object 3"}]
+    assert MT.parse("move object 2 to the left", props)["prop"] == 1
+    assert MT.parse("put object 3 next to object 1", props) == {"prop": 2, "goal": ("near", 0, "next to")}
+    assert MT.parse("move the object 1 to the left", props)["prop"] == 0

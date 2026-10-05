@@ -48,7 +48,7 @@ def _setup(rng):
         if not w.can_grasp("prop_0")[0]:
             return None
         if not w.refusal("prop_0", MT.goal_xy(w, plan)):
-            return w, S.make_task(w, plan, f"put the mover {task_name}")
+            return w, PS.make_task(w, plan, f"put the mover {task_name}")
     return None
 
 

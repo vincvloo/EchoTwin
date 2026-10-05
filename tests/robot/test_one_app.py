@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
-from echotwin.robot import server
+from echotwin.robot import scan_api, server
 from echotwin.robot.features import imageutil
 
 
@@ -22,7 +22,7 @@ def scans(monkeypatch):
 
     async def fake(frames, pitches=None):
         seen.append(frames)
-    monkeypatch.setattr(server, "process_scan", fake)
+    monkeypatch.setattr(scan_api, "process_scan", fake)
 
     def wait():
         for _ in range(100):
