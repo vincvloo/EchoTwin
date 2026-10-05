@@ -119,3 +119,37 @@ class PlaneMap:
             p = H @ np.array([xy[0], xy[1], 1.0])
             return p[:2] / p[2]
         return cls(to_table, to_pixel)
+
+
+DARK = 95                 # grey level (0 to 255) below which a pixel can be a gripper pad: dark rubber, darker than the hand and the table
+
+
+def find_pads(bgr: np.ndarray, expected_px, sep_px: float, dark: int = DARK) -> tuple[float, float] | None:
+    """Where the gripper is, seen from above: the midpoint (x, y) in pixels of its two pads, or None.
+
+    The pads are the darkest things near the tool: two small dark blobs about `sep_px` apart on one line. `expected_px` is where
+    the joints say the tool is; the search window is generous because that is the number being checked."""
+    h, w = bgr.shape[:2]
+    r = int(max(1.1 * sep_px, 40))
+    cx, cy = int(round(expected_px[0])), int(round(expected_px[1]))
+    x0, y0, x1, y1 = max(0, cx - r), max(0, cy - r), min(w, cx + r), min(h, cy + r)
+    if x1 - x0 < 20 or y1 - y0 < 20:
+        return None
+    grey = cv2.cvtColor(bgr[y0:y1, x0:x1], cv2.COLOR_BGR2GRAY)
+    mask = (grey < dark).astype(np.uint8)
+    n, _, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    blobs = [(cents[i], stats[i, cv2.CC_STAT_AREA]) for i in range(1, n) if stats[i, cv2.CC_STAT_AREA] >= 0.02 * sep_px ** 2]
+    best, score = None, 0.0
+    for i in range(len(blobs)):
+        for j in range(i + 1, len(blobs)):
+            (a, aa), (b, ba) = blobs[i], blobs[j]
+            d = float(np.hypot(*(a - b)))
+            if not 0.7 * sep_px <= d <= 1.3 * sep_px or max(aa, ba) > 2.5 * min(aa, ba):
+                continue
+            mid = (a + b) / 2
+            s = min(aa, ba) / (1.0 + np.hypot(mid[0] - (cx - x0), mid[1] - (cy - y0)) / sep_px)       # similar, big and near the expectation
+            if s > score:
+                best, score = mid, s
+    if best is None:
+        return None
+    return float(best[0] + x0), float(best[1] + y0)
