@@ -50,6 +50,16 @@ def _f(*v) -> str:
     return " ".join(f"{x:.4f}" for x in v)
 
 
+ATLAS_SUFFIX = "_cube.png"    # a skin with this name holds the six faces (3 rows x 4 columns), see features/everyday.cube_atlas
+
+
+def _skin_texture(i: int, path: str) -> str:
+    """The object's own look. One image on all six faces, or (name ends in _cube.png) one tile per face."""
+    path = path.replace("\\", "/")
+    grid = ' gridsize="3 4" gridlayout=".U..LFRB.D.."' if path.endswith(ATLAS_SUFFIX) else ""
+    return f'<texture name="skin_{i}" type="cube" file="{path}"{grid}/>'
+
+
 def build_xml(layout: Layout) -> str:
     tw, th = layout.table_half
     if layout.texture:
@@ -80,8 +90,7 @@ def build_xml(layout: Layout) -> str:
                                f'<material name="skin_{i}" texture="skin_{i}" rgba="1 1 1 1"/>')
             look = f'material="skin_{i}"'
         elif pr.get("skin") and not pr.get("mesh"):
-            # the object's own photo on every face (cube texture, same image on all six faces)
-            prop_assets.append(f'<texture name="skin_{i}" type="cube" file="{pr["skin"].replace(chr(92), "/")}"/>'
+            prop_assets.append(_skin_texture(i, pr["skin"]) +
                                f'<material name="skin_{i}" texture="skin_{i}" rgba="1 1 1 {alpha}"/>')
             look = f'material="skin_{i}"'
         else:

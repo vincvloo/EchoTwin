@@ -12,11 +12,13 @@ import cv2
 import numpy as np
 
 from ...perception import marker as MK
-from ..scene import TABLE_ASPECT
+from ..scene import ATLAS_SUFFIX, TABLE_ASPECT
 
 CAM_HEIGHT = 0.45        # metres above the table, assumed
 MAX_OBJECTS = 8
 TEX_PX = (1188, 840)     # texture size, same aspect as the sim table
+TILE = 192               # one face of an object's skin, in pixels
+THIN = 0.3               # a mask filling less than this share of its box is a thin, long thing (a cable): it lies flat
 
 
 def _prep(bgr, max_side=960):
@@ -231,6 +233,35 @@ def apply_names(res: dict, ai: dict | None):
     return res
 
 
+def cube_atlas(rgb, near=None, top=None) -> np.ndarray:
+    """The six faces of an object in one image (3 rows x 4 columns, the layout MuJoCo reads when the file ends in
+    ATLAS_SUFFIX). `near` is the face the phone camera sees (its photo), `top` the face seen from above; the other faces
+    are the object's plain colour, shaded. With no photo of a face, one colour is the better guess than a stretched photo."""
+    base = np.array(rgb[::-1], float) * 255
+
+    def plain(k):
+        return np.full((TILE, TILE, 3), np.clip(base * k, 0, 255), np.uint8)
+
+    tiles = {"U": plain(0.7), "D": plain(1.0), "L": plain(0.8), "R": plain(0.9), "F": plain(1.1), "B": plain(0.5)}
+    if near is not None:
+        tiles["D"] = cv2.resize(near, (TILE, TILE), interpolation=cv2.INTER_AREA)   # D: the face toward the camera (-y)
+    if top is not None:
+        tiles["F"] = cv2.resize(top, (TILE, TILE), interpolation=cv2.INTER_AREA)    # F: the top (+z), image up = +y
+    atlas = np.zeros((3 * TILE, 4 * TILE, 3), np.uint8)
+    for r, row in enumerate((".U..", "LFRB", ".D..")):
+        for c, ch in enumerate(row):
+            atlas[r * TILE:(r + 1) * TILE, c * TILE:(c + 1) * TILE] = tiles.get(ch, 0)
+    return atlas
+
+
+def is_thin(it: dict) -> bool:
+    """A cable or a pen: long and thin in the photo, so it lies on the table and is not a block."""
+    if it.get("mask") is None:
+        return False
+    x, y, w, h = it["box"]
+    return w * h > 0 and float(it["mask"].sum()) / (w * h) < THIN
+
+
 def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
     """Real-size objects on a table that fits them -> (props for the Layout, texture path, annotated image).
     Sets res["table_half"] (metres): the mapped area, with the shape of the texture."""
@@ -256,6 +287,8 @@ def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
     px = tw / TEX_PX[0]  # sim metres per texture pixel
     props = []
     for i, it in enumerate(items):
+        if is_thin(it):
+            it["shape"] = "flat"
         x, y = (it["xy"][0] - cx) * s, (it["xy"][1] - cy) * s
         w, d, h = (v * s for v in it["size"])
         yaw, skin = 0.0, None
@@ -269,7 +302,8 @@ def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
                 w, d, yaw = rw * px, rh * px, -ang
                 M = cv2.getRotationMatrix2D((u, v), ang, 1.0)
                 rot = cv2.warpAffine(tex, M, TEX_PX, flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-                skin = cv2.getRectSubPix(rot, (max(4, int(rw)), max(4, int(rh))), (u, v))
+                top_view = cv2.getRectSubPix(rot, (max(4, int(rw)), max(4, int(rh))), (u, v))
+                skin = cube_atlas((top_view.reshape(-1, 3).mean(0)[::-1] / 255).tolist(), top=top_view)   # edges: the top's own colour
             h = min(h, 0.012)
         elif it.get("mask") is not None:
             # standing things: skin = their photo, background filled with their own colour
@@ -277,10 +311,10 @@ def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
             crop = bgr[by:by + bh, bx:bx + bw].copy()
             mk = it["mask"][by:by + bh, bx:bx + bw]
             crop[~mk] = np.array(it["rgb"][::-1]) * 255
-            skin = crop
+            skin = cube_atlas(it["rgb"], near=crop)
         if skin is not None and skin.size:
-            path = out_dir / f"prop_{i}.png"
-            cv2.imwrite(str(path), cv2.resize(skin, (256, 256)))  # each face stretches it to fit
+            path = out_dir / f"prop_{i}{ATLAS_SUFFIX}"
+            cv2.imwrite(str(path), skin)
             skin = str(path.resolve())
         props.append({"name": it["name"], "pos": (float(x), float(y)), "yaw": float(yaw),
                       "size": (float(max(w, 0.02) / 2), float(max(d, 0.02) / 2), float(max(h, 0.006) / 2)),
