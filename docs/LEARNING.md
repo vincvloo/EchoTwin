@@ -39,7 +39,8 @@ Training needs torch, which lives in the perception environment (`PERCEPTION_PY`
 the network has about half a million weights and trains in about a minute).
 
 ```bash
-<perception python> -m echotwin.robot.train_policy data/policy/sim_demos data/policy/my_demos --human-weight 5 \n    --epochs 150 --hidden 512 --grip-weight 5 --out data/policy/act_lite.npz
+<perception python> -m echotwin.robot.train_policy data/policy/sim_demos data/policy/my_demos --human-weight 5 \
+    --epochs 150 --hidden 512 --grip-weight 5 --out data/policy/act_lite.npz
 ```
 
 `--human-weight 5` counts your own demonstrations five times as much as the simulated ones. The result is a plain numpy `.npz` and a
