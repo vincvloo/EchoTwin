@@ -138,6 +138,9 @@ function onScan(m) {
   }
   if (m.stage === 'done' || m.stage === 'error') {
     scanning = false;
+    // naming until the robot's own objects carry the names (they arrive a moment after the summary)
+    naming = m.stage === 'done' && !!(m.summary && (m.summary.naming || (m.summary.props || []).some(n => !/^object \d+$/.test(n))));
+    chipKey = null; if (state) renderChips(state.props);
     if (m.stage === 'error') $('#said').textContent = 'Scan failed: ' + m.error;
   }
   if (state) renderState();
@@ -270,14 +273,16 @@ $('#mic').addEventListener('touchstart', micStart, { passive: false }); $('#mic'
 $('#mic').addEventListener('mousedown', micStart); $('#mic').addEventListener('mouseup', micEnd);
 $('#send').onclick = () => { say($('#txt').value); $('#txt').value = ''; };
 $('#txt').addEventListener('keydown', e => { if (e.key === 'Enter') $('#send').click(); });
-let chipKey = null;
+let chipKey = null, naming = false;
 function renderChips(props) {
   const names = (props || []).map(p => p.name);
-  const key = names.join('|');
+  const key = names.join('|') + naming;
   if (key === chipKey) return;
   chipKey = key;
   $('#txt').placeholder = names.length ? `Put the ${names[0]} next to the ${names[1] || names[0]}` : 'Scan the table first';
-  const first = names.length
+  const unnamed = names.length && naming && names.every(n => /^object \d+$/.test(n));
+  if (unnamed) $('#said').textContent = 'Naming what is on the table…';
+  const first = names.length && !unnamed
     ? [`Put the ${names[0]} next to the ${names[1] || names[0]}`, names[1] ? `Move the ${names[1]} to the left` : 'Move it to the left']
     : [];
   $('#chips').innerHTML = '';

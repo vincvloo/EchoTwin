@@ -40,6 +40,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     n = len(props)
     ai = ctx.ask_ai_json is not None
     summary = {"id": sid, "mode": "everyday", "frames": len(frames), "views": 1, "fallback": False,
+               "naming": bool(n and ai),                    # the AI is still naming the objects: the pages say "naming..."
                "objects": {}, "unsure": [], "thumbs": [], "twin": f"/scans/{sid}/twin.jpg",
                "texture": f"/scans/{sid}/table.png", "seconds": 0, "pitch": res["pitch"], "calibration": res["calibration"],
                "props": [p["name"] for p in props],
@@ -56,6 +57,8 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
         named_json = await ctx.ask_ai_json(buf.tobytes(), EV.NAMING_PROMPT)
     if not named_json:
         ctx.say(f"I see {n} things, but I can't tell what they are right now.")
+        summary["naming"] = False                            # the same dict the robot keeps: a page that connects later sees it too
+        ctx.progress("done", {"summary": summary})
         return
     named = EV.apply_names({"items": [dict(i) for i in res["items"]]}, named_json)["items"]
     by_box = {tuple(i["box"]): i for i in named}
@@ -66,6 +69,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     props, _, ann = await asyncio.to_thread(EV.build, res, out)
     cv2.imwrite(str(out / "twin.jpg"), ann, [cv2.IMWRITE_JPEG_QUALITY, 85])
     summary["props"] = [it["name"] for it in res["items"]]
+    summary["naming"] = False
     summary["twin"] = f"/scans/{sid}/twin.jpg?named{int(time.time())}"
     ctx.progress("done", {"summary": summary})
     ctx.rename(props, EV.greeting(named))
