@@ -29,7 +29,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     ctx.progress("everyday", {"pitch": pitch})
     res = await asyncio.to_thread(EV.analyse, frames[k], pitch, MK.size_m())
     ctx.say("I found the marker, so the sizes are measured." if res["calibration"]["source"] == "marker" else
-            "No marker in the photos, so sizes are estimated and can be off. Print one: see the capture guide.")
+            "I estimated the sizes from the photo.")
     sid, out = ctx.new_dir()
     EV.apply_names(res, None)
     props, tex, ann = await asyncio.to_thread(EV.build, res, out)

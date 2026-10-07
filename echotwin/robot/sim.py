@@ -157,20 +157,30 @@ class Sim:
         self._rebuild(self.base_layout)
         self.say(line or f"Sizes changed by {k:.2f}. The table is now {self.base_layout.meta['scale']:.2f} times what the photo said.")
 
-    def set_arm(self, name: str):
-        """Change the robot arm (a descriptor in echotwin/robot/arms or a path). The table stays as it is."""
+    ARM_SIZE_RANGE = (0.75, 4.0)    # tested: the built-in arm picks and places at every size in it (docs/ARMS.md)
+
+    def set_arm(self, name: str | None = None, size: float | None = None):
+        """Change the robot arm (a descriptor in echotwin/robot/arms or a path) and/or its size (1.0 = as described).
+        The table stays as it is. Without a name the arm stays, without a size the size stays."""
         if self.world.name != "sim":
             return self.say("I can only change the arm of the simulation.")
         old = self.world.arm
+        name, size = name or old.name, float(old.scale if size is None else size)
+        lo, hi = self.ARM_SIZE_RANGE
+        if not lo <= size <= hi:
+            return self.say(f"I can be between {lo} and {hi} times my size.")
         try:
-            self.world.arm = A.load(name)
+            self.world.arm = A.load(name).sized(size)
             self._abort()
             self._rebuild(self.base_layout)
         except (A.ArmError, ValueError) as e:
             self.world.arm = old
             self.log("system", f"Could not use that arm: {e}")
             return self.say("I couldn't use that arm. I keep the one I have.")
-        self.say(f"Now I have the {self.world.arm.name} arm.")
+        a, ws = self.world.arm, self.world.workspace
+        size_txt = "" if abs(size - 1) < 1e-6 else f" at {size:.2f} times its size"
+        self.say(f"Now I have the {a.name} arm{size_txt}: my jaws open {a.max_opening * 100:.0f} cm "
+                 f"and I reach {ws.r_min * 100:.0f} to {ws.r_max * 100:.0f} cm from my base.")
 
     def name_props(self, props: list[dict], line: str):
         """The AI named the everyday objects (and their shapes) after the twin was already shown."""
@@ -495,7 +505,7 @@ class Sim:
                        "h": pr["size"][2]} for i, pr in enumerate(w.layout.props)],
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
-            "arm": w.arm.name if hasattr(w, "arm") else None, "scale": float(self.base_layout.meta.get("scale", 1.0)),
+            "arm": w.arm.name if hasattr(w, "arm") else None, "arm_size": float(w.arm.scale) if hasattr(w, "arm") else 1.0, "scale": float(self.base_layout.meta.get("scale", 1.0)),
             "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready(), "policy": self.policy is not None},
             "attempt": ((self.replay or {}).get("loop") or {}).get("attempts", 0) + 1 if self.mode == "move" and (self.replay or {}).get("loop") else None,
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,

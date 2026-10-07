@@ -134,11 +134,45 @@ async def arms():
 
 @router.post("/api/arm")
 async def arm_switch(body: dict):
-    known = {a["name"]: a for a in A.describe_arms()}
-    a = known.get(str(body.get("name", "")))
-    if a is None:
-        return JSONResponse({"ok": False, "error": "No such arm."})
-    if not a["ready"]:
-        return JSONResponse({"ok": False, "error": f"Fetch it first: python -m echotwin.robot.arm --download {a['name']}"})
-    sim.submit(sim.set_arm, a["name"])
+    """{"name": "so_arm100"} switches the arm, {"size": 2.0} resizes it (1.0 = as described), both at once is fine."""
+    name, size = body.get("name"), body.get("size")
+    if name is not None:
+        known = {a["name"]: a for a in A.describe_arms()}
+        a = known.get(str(name))
+        if a is None:
+            return JSONResponse({"ok": False, "error": "No such arm."})
+        if not a["ready"]:
+            return JSONResponse({"ok": False, "error": f"Fetch it first: python -m echotwin.robot.arm --download {a['name']}"})
+    if size is not None:
+        lo, hi = sim.ARM_SIZE_RANGE
+        try:
+            size = float(size)
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "error": "The size is a number, 1 is the arm as described."})
+        if not lo <= size <= hi:
+            return JSONResponse({"ok": False, "error": f"The arm can be {lo} to {hi} times its size."})
+    if name is None and size is None:
+        return JSONResponse({"ok": False, "error": "Give an arm name, a size, or both."})
+    sim.submit(sim.set_arm, None if name is None else str(name), size)
     return JSONResponse({"ok": True})
+
+
+@router.get("/api/arm/needed")
+async def arm_needed():
+    """What size of arm each object needs, for the arm in use. Read from the sim thread's world: plain numbers, no rendering."""
+    w = sim.world
+    if not hasattr(w, "size_needed"):
+        return JSONResponse({"ok": False, "error": "Only for the simulation."})
+    try:
+        s = float(w.arm.scale)
+        objects = [w.size_needed(f"prop_{i}") for i in range(len(w.layout.props))]
+    except (KeyError, IndexError, AttributeError):         # the sim thread is rebuilding the twin right now
+        return JSONResponse({"ok": False, "error": "busy, try again"})
+    can = [o for o in objects if o["needed"] is not None]
+    all_k = max([o["needed"] for o in can], default=None)
+    lo, hi = sim.ARM_SIZE_RANGE
+    return JSONResponse({"ok": True, "arm": w.arm.name, "size": s, "range": [lo, hi],
+                         "opening_cm": round(float(w.arm.max_opening or 0.08) / s * 100, 1),
+                         "reach_cm": [round(w.workspace.r_min / s * 100, 1), round(w.workspace.r_max / s * 100, 1)],
+                         "objects": objects,
+                         "all": all_k if all_k is not None and all_k <= min(o["most"] for o in can) else None})

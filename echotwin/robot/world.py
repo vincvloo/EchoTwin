@@ -84,9 +84,9 @@ class World:
         self.hand = HandState()
         self.go_rest(teleport=True)
 
-    @staticmethod
-    def base_xy(layout: Layout) -> tuple[float, float]:
-        return (0.0, -layout.table_half[1] + BASE_INSET)
+    def base_xy(self, layout: Layout) -> tuple[float, float]:
+        """Where the arm's base stands: at the front edge, a bigger arm a little further in."""
+        return (0.0, -layout.table_half[1] + BASE_INSET * self.arm.scale)
 
     def rest_target(self) -> np.ndarray:
         r = 0.5 * (self.workspace.r_min + self.workspace.r_max)
@@ -155,6 +155,36 @@ class World:
         if h < MIN_THICKNESS:
             return False, f"it is only {h * 1000:.0f} mm thick, too thin to pick up from the table"
         return True, ""
+
+    def size_needed(self, name: str) -> dict:
+        """How big this arm would have to be to pick this object up where it lies: big enough for the jaws to open around it
+        and to reach it, not so big that the object is inside the ring it cannot bend down to. Sizes are relative to the
+        arm as described (1.0). `needed` is None when no size works (too thin to pinch, or out of the arm's sweep)."""
+        s = float(self.arm.scale)
+        opening = float(self.arm.max_opening or 0.08) / s
+        width, thick = self.grasp_width(name), 2 * self.half(name)
+        r_min, r_max = self.workspace.r_min / s, self.workspace.r_max / s
+        base1 = np.asarray(self.base, float)[:2] - np.array([0.0, BASE_INSET * (s - 1)])   # where the base stands at size 1
+        obj = self.obj_pos(name)[:2]
+
+        def dist(k):                                        # a bigger arm stands further in (base_xy): distance at size k
+            return float(np.hypot(*(obj - base1 - np.array([0.0, BASE_INSET * (k - 1)]))))
+        reach, most = dist(1.0) / r_max, dist(1.0) / max(r_min, 1e-6)
+        for _ in range(8):                                  # solve k * r_max = dist(k) (and the same for r_min)
+            reach, most = dist(reach) / r_max, dist(most) / max(r_min, 1e-6)
+        rel = obj - base1
+        grasp = (width + GRIP_MARGIN) / opening
+        k = max(grasp, reach)
+        why = ""
+        if thick < MIN_THICKNESS:
+            why = f"it is only {thick * 1000:.0f} mm thick: no gripper pinches that from a table"
+        elif abs(np.arctan2(rel[0], rel[1])) > self.workspace.pan:
+            why = "it is beside the arm, where the base cannot turn"
+        elif k > most:
+            why = "an arm with jaws that wide could not bend down so close to its base"
+        return {"name": self.layout.props[int(name[5:])]["name"], "width_cm": round(width * 100, 1),
+                "grasp": round(grasp, 2), "reach": round(reach, 2), "most": round(most, 2),
+                "needed": None if why else round(k, 2), "why": why}
 
     def refusal(self, name: str, goal_xy=None) -> str:
         """Why the arm cannot move this object (to this spot), in plain words; empty when it can."""
