@@ -34,6 +34,24 @@ class Layout:
                       [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles],
                       tuple(self.table_half), dict(self.surface))
 
+    THING_SIZE = (0.005, 2.0)     # metres: the largest side of a thing to move, from a button to a chair
+    AREA_MAX = 20.0               # metres: the widest mapped area
+
+    def scale_problem(self, k: float) -> str | None:
+        """Why rescaling by k would give sizes that cannot be real, in plain words; None when they are plausible."""
+        if not k > 0:
+            return "The factor must be more than zero."
+        lo, hi = self.THING_SIZE
+        for p in self.props:
+            side = 2 * max(p["size"]) * k
+            if side < lo:
+                return f"That would make the {p['name']} {side * 1000:.1f} mm big: too small to be real."
+            if side > hi:
+                return f"That would make the {p['name']} {side:.1f} m big: too big to be a thing to move."
+        if 2 * max(self.table_half) * k > self.AREA_MAX:
+            return f"That would make the mapped area {2 * max(self.table_half) * k:.0f} m wide."
+        return None
+
     def scaled(self, k: float) -> "Layout":
         """The whole scene k times bigger (or smaller): table, objects, furniture, scanned meshes and the phone's camera.
         The arm is not touched, so this is also "the arm k times smaller". `meta["scale"]` keeps the product so far."""
