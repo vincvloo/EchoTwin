@@ -9,6 +9,7 @@ import numpy as np
 
 DEFAULT_TABLE_HALF = (0.40, 0.30)       # half size of the table (x, y) in metres, when nothing says otherwise
 TABLE_ASPECT = 1188 / 840               # width / height of the table texture the quick importer builds
+SOLID_TABLE_MIN = DEFAULT_TABLE_HALF    # the table is never smaller than this: a photo shows a patch of it, not all of it
 
 
 @dataclass
@@ -82,8 +83,28 @@ def _skin_texture(i: int, path: str) -> str:
     return f'<texture name="skin_{i}" type="cube" file="{path}"{grid}/>'
 
 
+def _edge_colour(texture: str | None) -> str:
+    """The colour around the patch the photo covers: the average of the texture's border (a wood brown without a texture)."""
+    if texture:
+        try:
+            import cv2
+            img = cv2.imread(texture)
+            if img is not None:
+                b = max(2, min(img.shape[:2]) // 40)
+                edge = np.concatenate([img[:b].reshape(-1, 3), img[-b:].reshape(-1, 3),
+                                       img[:, :b].reshape(-1, 3), img[:, -b:].reshape(-1, 3)])
+                r, g, bl = (edge.mean(0)[::-1] / 255).tolist()
+                return f"{r:.3f} {g:.3f} {bl:.3f} 1"
+        except Exception:                          # an unreadable texture: the plain colour below
+            pass
+    return "0.62 0.50 0.38 1"
+
+
 def build_xml(layout: Layout) -> str:
-    tw, th = layout.table_half
+    tw, th = layout.table_half                      # the patch that is mapped (texture, goals, where the arm stands)
+    sw, sh = max(tw, SOLID_TABLE_MIN[0]), max(th, SOLID_TABLE_MIN[1])     # the table itself, at least a normal one
+    around = (f'<geom name="tablesurround" type="plane" pos="0 0 0.0001" size="{_f(sw, sh, 0.01)}" '
+              f'rgba="{_edge_colour(layout.texture)}" contype="0" conaffinity="0"/>') if (sw, sh) != (tw, th) else ""
     if layout.texture:
         tex = layout.texture.replace("\\", "/")
         table_asset = (f'<texture name="tabletex" type="2d" file="{tex}"/>'
@@ -159,9 +180,10 @@ def build_xml(layout: Layout) -> str:
   <worldbody>
     <light pos="0.3 -0.6 1.4" dir="-0.15 0.35 -1" diffuse="0.7 0.7 0.7" castshadow="true"/>
     <geom name="floor" type="plane" pos="0 0 -0.75" size="4 4 0.1" {'rgba="0 0 0 0"' if layout.scene else 'material="floor"'}/>
-    <geom name="table" type="box" pos="0 0 -0.02" size="{_f(tw + 0.02, th + 0.02, 0.02)}" rgba="0.36 0.27 0.20 1"/>
+    <geom name="table" type="box" pos="0 0 -0.02" size="{_f(sw + 0.02, sh + 0.02, 0.02)}" rgba="0.36 0.27 0.20 1"/>
+    {around}
     <geom name="tabletop" type="plane" pos="0 0 0.0002" size="{_f(tw, th, 0.01)}" material="tabletop" contype="0" conaffinity="0"/>
-    {"".join(f'<geom type="box" pos="{_f(sx * (tw - 0.04), sy * (th - 0.04), -0.39)}" size="0.025 0.025 0.35" rgba="0.3 0.23 0.17 {0 if layout.scene else 1}"/>' for sx in (-1, 1) for sy in (-1, 1))}
+    {"".join(f'<geom type="box" pos="{_f(sx * (sw - 0.04), sy * (sh - 0.04), -0.39)}" size="0.025 0.025 0.35" rgba="0.3 0.23 0.17 {0 if layout.scene else 1}"/>' for sx in (-1, 1) for sy in (-1, 1))}
     {"".join(scenery)}
     {"".join(fixed)}
     {"".join(props)}
