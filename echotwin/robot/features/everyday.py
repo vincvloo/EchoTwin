@@ -12,12 +12,15 @@ import cv2
 import numpy as np
 
 from ...perception import marker as MK
+from . import lathe
 from ..scene import ATLAS_SUFFIX, TABLE_ASPECT
 
 CAM_HEIGHT = 0.45        # metres above the table, assumed
 MAX_OBJECTS = 8
 TEX_PX = (1188, 840)     # texture size, same aspect as the sim table
 TILE = 192               # one face of an object's skin, in pixels
+ROUND_FILL = 0.58        # a rounded thing fills at least this share of its box ...
+ROUND_CORNERS = 0.33     # ... and leaves its corners mostly empty (see guess_shape)
 THIN = 0.3               # a mask filling less than this share of its box is a thin, long thing (a cable): it lies flat
 
 
@@ -150,6 +153,7 @@ def marks_image(bgr, objs) -> np.ndarray:
 
 
 SHAPES = ("box", "cylinder", "flat", "round")
+ROUND = ("round", "cylinder")     # shapes that are built from the object's outline (lathe.py)
 
 NAMING_PROMPT = """The photo shows a table with numbered yellow boxes around things on it.
 For each number, name the object in 1-4 plain words and say its 3D shape:
@@ -207,7 +211,8 @@ def analyse(jpeg_or_bgr, pitch_deg: float | None = None, marker_m: float | None 
         height = max(0.005, cam.height_at(x + w / 2, float(np.percentile(ys, 2)), centre[1]))
         colour = cv2.mean(bgr, mask=o["mask"].astype(np.uint8))[:3][::-1]
         items.append({"box": o["box"], "xy": centre[:2].tolist(), "size": [width, depth, min(height, 3 * width + 0.05)],
-                      "rgb": [c / 255 for c in colour], "name": None, "shape": "box", "mask": o["mask"]})
+                      "rgb": [c / 255 for c in colour], "name": None,
+                      "shape": guess_shape(o["mask"][y:y + h, x:x + w]), "mask": o["mask"]})
     return {"bgr": bgr, "table": table, "items": items, "cam": cam, "pitch": pitch, "calibration": cal,
             "marks": marks_image(bgr, [{"box": i["box"]} for i in items])}
 
@@ -254,6 +259,17 @@ def cube_atlas(rgb, near=None, top=None) -> np.ndarray:
     return atlas
 
 
+def guess_shape(mask_crop: np.ndarray) -> str:
+    """round or box from the outline alone (used until the AI says what the thing is): a compact blob whose corners are empty
+    is rounded; a ragged mask (a wrapper, a cable) or one that fills its corners stays a box."""
+    h, w = mask_crop.shape
+    if h < 8 or w < 8:
+        return "box"
+    s = max(2, int(0.2 * min(h, w)))
+    corners = float(np.mean([c.mean() for c in (mask_crop[:s, :s], mask_crop[:s, -s:], mask_crop[-s:, :s], mask_crop[-s:, -s:])]))
+    return "round" if float(mask_crop.mean()) >= ROUND_FILL and corners < ROUND_CORNERS else "box"
+
+
 def is_thin(it: dict) -> bool:
     """A cable or a pen: long and thin in the photo, so it lies on the table and is not a block."""
     if it.get("mask") is None:
@@ -291,7 +307,7 @@ def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
             it["shape"] = "flat"
         x, y = (it["xy"][0] - cx) * s, (it["xy"][1] - cy) * s
         w, d, h = (v * s for v in it["size"])
-        yaw, skin = 0.0, None
+        yaw, skin, mesh = 0.0, None, {}
         if it["shape"] == "flat" and it.get("mask") is not None:
             # flat things: exact outline and rotation from the top-down view, skin = their top-down look
             m = cv2.warpPerspective(it["mask"].astype(np.uint8) * 255, H, TEX_PX, flags=cv2.INTER_NEAREST)
@@ -310,15 +326,26 @@ def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
             bx, by, bw, bh = it["box"]
             crop = bgr[by:by + bh, bx:bx + bw].copy()
             mk = it["mask"][by:by + bh, bx:bx + bw]
-            crop[~mk] = np.array(it["rgb"][::-1]) * 255
+            edge = 11 if it["shape"] in ROUND else 7        # the mask edge is mostly table; a rounded thing shows its edge more
+            inner = cv2.erode(mk.astype(np.uint8), np.ones((edge, edge), np.uint8),
+                              borderType=cv2.BORDER_CONSTANT, borderValue=0).astype(bool)   # also at the photo's own edge
+            crop[~(inner if inner.any() else mk)] = np.array(it["rgb"][::-1]) * 255
             skin = cube_atlas(it["rgb"], near=crop)
+            if it["shape"] in ROUND:                       # a rounded thing gets the shape of its own outline
+                prof = lathe.profile(mk)
+                if prof is not None:
+                    v, uv, f = lathe.build(prof, max(w, 0.02), max(d, 0.02), max(h, 0.006))
+                    (out_dir / f"prop_{i}.obj").write_text(lathe.to_obj(v, uv, f))
+                    cv2.imwrite(str(out_dir / f"prop_{i}_tex.png"), lathe.texture(crop, it["rgb"]))
+                    mesh = {"mesh": str((out_dir / f"prop_{i}.obj").resolve()), "mesh_scale": (1.0, 1.0, 1.0),
+                            "mesh_texture": str((out_dir / f"prop_{i}_tex.png").resolve())}
         if skin is not None and skin.size:
             path = out_dir / f"prop_{i}{ATLAS_SUFFIX}"
             cv2.imwrite(str(path), skin)
             skin = str(path.resolve())
         props.append({"name": it["name"], "pos": (float(x), float(y)), "yaw": float(yaw),
                       "size": (float(max(w, 0.02) / 2), float(max(d, 0.02) / 2), float(max(h, 0.006) / 2)),
-                      "rgb": it["rgb"], "shape": it["shape"], "skin": skin})
+                      "rgb": it["rgb"], "shape": it["shape"], "skin": None if mesh else skin, **mesh})
     ann = res["marks"].copy()
     for i, it in enumerate(items, 1):
         x, y, w, h = it["box"]
