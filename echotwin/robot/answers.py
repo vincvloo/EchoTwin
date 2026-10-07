@@ -11,6 +11,12 @@ from .features.everyday import listing
 NO_TABLE = "Scan your table first, so I know what is on it."
 
 
+def _on(world) -> str:
+    """Where the things are, for sentences: 'the table', 'the floor', 'the surface'."""
+    kind = (getattr(world.layout, "surface", None) or {}).get("kind", "table")
+    return {"table": "the table", "floor": "the floor"}.get(kind, "the surface")
+
+
 def about_robot(sim, n: str) -> str:
     """n: why_stop | doing | sure | learned | who | help (the names in router.ROBOT_Q)."""
     if n == "why_stop":
@@ -68,7 +74,7 @@ def where_prop(world, i: int) -> str:
     close = min(near) if near else None
     extra = f", next to the {world.layout.props[close[1]]['name']}" if close and close[0] < 0.06 else ""
     spot = f"at the {fb} {lr}" if lr != "middle" else f"in the {fb} middle"
-    return f"The {name} is {spot} of the table{extra}."
+    return f"The {name} is {spot} of {_on(world)}{extra}."
 
 
 def about_table(world, n: str, data: dict) -> str:
@@ -84,10 +90,11 @@ def about_table(world, n: str, data: dict) -> str:
     if not props:
         return "I don't see anything yet. Snap a photo of your table first."
     if n == "count":
-        return f"I see {len(props)} thing{'s' if len(props) != 1 else ''} on the table."
+        return f"I see {len(props)} thing{'s' if len(props) != 1 else ''} on {_on(world)}."
     if n == "where":
         ment = MT._mentions(data.get("text", ""), props)
         if ment:
             return where_prop(world, ment[0][1])
         return " ".join(where_prop(world, i) for i in range(len(props)))
-    return f"On your table I see {listing([p['name'] for p in props])}."
+    where = "your table" if _on(world) == "the table" else _on(world)
+    return f"On {where} I see {listing([p['name'] for p in props])}."

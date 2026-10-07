@@ -13,7 +13,7 @@ import numpy as np
 
 from ...perception import marker as MK
 from . import lathe
-from ..scene import ATLAS_SUFFIX, TABLE_ASPECT
+from ..scene import ATLAS_SUFFIX, DEFAULT_SURFACE, TABLE_ASPECT, Layout
 
 CAM_HEIGHT = 0.45        # metres above the table, assumed
 MAX_OBJECTS = 8
@@ -155,11 +155,48 @@ def marks_image(bgr, objs) -> np.ndarray:
 SHAPES = ("box", "cylinder", "flat", "round")
 ROUND = ("round", "cylinder")     # shapes that are built from the object's outline (lathe.py)
 
-NAMING_PROMPT = """The photo shows a table with numbered yellow boxes around things on it.
-For each number, name the object in 1-4 plain words and say its 3D shape:
+NAMING_PROMPT = """The photo shows things lying on a surface (a table, the floor, a shelf, a bed...), with numbered yellow
+boxes around them. For each number, name the object in 1-4 plain words and say its 3D shape:
 box (boxy), cylinder (glass, bottle, cup), flat (paper, wrapper, card, phone lying down), round (egg-shaped, ball, case).
-Reply with JSON only: {"objects": [{"id": 1, "name": "black earbud case", "shape": "round"}]}
-Use "skip": true for a box that is not a real object (shadow, reflection, part of the table)."""
+Also say what they stand on: "table" (a table or desk), "floor", or "other" (a shelf, a bed, a chair...).
+Reply with JSON only: {"surface": "table", "objects": [{"id": 1, "name": "black earbud case", "shape": "round"}]}
+Use "skip": true for a box that is not a real object (shadow, reflection, part of the table or floor)."""
+
+# How high the phone is assumed to be above what it photographs, when nothing measured it (no marker): the whole
+# one-photo estimate scales with it. Above a table someone leans over it; the floor is photographed standing.
+PHONE_ABOVE = {"table": CAM_HEIGHT, "floor": 1.2}
+STANDING_PHONE = 1.25    # m above the floor; above a surface of height h the phone is about this minus h
+
+
+def phone_height(surface: dict | None) -> float:
+    s = surface or DEFAULT_SURFACE
+    if s.get("kind") in PHONE_ABOVE:
+        return PHONE_ABOVE[s["kind"]]
+    return float(np.clip(STANDING_PHONE - float(s.get("height", 0.45)), 0.35, PHONE_ABOVE["floor"]))
+
+
+def on_surface(layout: Layout, surface: dict) -> Layout:
+    """The same photo, now known to show things on `surface`: everything estimated from the phone height scales with it.
+    The table rescale the user made (meta["scale"]) is kept as it was."""
+    k = phone_height(surface) / phone_height(layout.surface)
+    lay = layout.scaled(k) if abs(k - 1) > 1e-9 else layout.copy()
+    lay.meta["scale"] = layout.meta.get("scale", 1.0)
+    if "scale" not in layout.meta:
+        lay.meta.pop("scale", None)
+    lay.surface = {"kind": surface["kind"], "height": 0.0 if surface["kind"] == "floor" else float(surface.get("height", 0.45))}
+    return lay
+
+
+def surface_from_ai(answer) -> dict | None:
+    """The surface the AI named in its naming answer, or None (no answer, or an odd one)."""
+    kind = answer.get("surface") if isinstance(answer, dict) else None
+    if kind == "table":
+        return dict(DEFAULT_SURFACE)
+    if kind == "floor":
+        return {"kind": "floor", "height": 0.0}
+    if kind == "other":
+        return {"kind": "other", "height": 0.45}
+    return None
 
 
 def erase_marker(bgr: np.ndarray, corners: np.ndarray) -> np.ndarray:
@@ -383,8 +420,13 @@ def listing(names: list[str]) -> str:
     return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
-def greeting(items: list[dict]) -> str:
+SURFACE_WORD = {"table": "table", "floor": "floor", "other": "surface"}
+
+
+def greeting(items: list[dict], kind: str = "table") -> str:
+    word = SURFACE_WORD.get(kind, "surface")
     if not items:
-        return "I can see your table, but nothing on it. Put a few things down and snap again."
+        return f"I can see the {word}, but nothing on it. Put a few things down and snap again."
     listed = listing([it["name"] for it in items])
-    return f"I've mapped your table. I see {listed}. That's an approximate map. What should I move?"
+    where = "your table" if kind == "table" else f"the {word}"
+    return f"I've mapped {where}. I see {listed}. That's an approximate map. What should I move?"
