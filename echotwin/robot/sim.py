@@ -12,6 +12,7 @@ import numpy as np
 
 from . import answers
 from . import arm as A
+from . import robots as RB
 from . import backend as BK
 from . import policy as POL
 from . import config
@@ -130,12 +131,25 @@ class Sim:
         if announce:
             self.say("Back to your table." if self.scan else "Scene reset.")
 
+    robot_choice: str | None = None     # a robot the user picked; None: the one that fits the surface (robots.for_surface)
+
+    def _robot_for(self, layout: Layout):
+        """Put the robot that fits where the things are, unless the user chose one (simulation only)."""
+        if self.world.name != "sim" or self.robot_choice is not None:
+            return
+        name = RB.for_surface(layout.surface)
+        if self.world.robot.name != name:
+            self.world.robot = RB.load(name)
+
     def apply_scan(self, layout: Layout, summary: dict):
         self._abort()
         self.halted = False
+        old = self.world.robot
+        self._robot_for(layout)
         try:
             self._rebuild(layout)
         except ValueError as e:  # e.g. a mesh MuJoCo cannot read: keep the current twin
+            self.world.robot = old
             self.log("system", f"Could not load that twin: {e}")
             return self.say("I couldn't load that twin. The current table stays as it is.")
         self.base_layout = layout.copy()
@@ -202,6 +216,7 @@ class Sim:
         lay.surface = dict(new)
         self._abort()
         self.base_layout = lay
+        self._robot_for(lay)
         self._rebuild(lay)
         if scan:
             scan["surface"] = dict(new)
@@ -210,6 +225,24 @@ class Sim:
         resized = "" if abs(k - 1) < 0.02 else (f" Seen from higher up, they are bigger than I thought: {k:.1f} times. I resized them."
                                                 if k > 1 else f" Seen from closer, they are smaller than I thought: {k:.1f} times. I resized them.")
         self.say(f"Got it: the things are {where}.{resized}")
+
+    def set_robot(self, name: str | None):
+        """Use this robot (robots/<name>.json); None or "auto": the one that fits the surface. The arm and its size stay."""
+        if self.world.name != "sim":
+            return self.say("I can only change the robot in the simulation.")
+        old, old_choice = self.world.robot, self.robot_choice
+        try:
+            self.robot_choice = None if name in (None, "auto") else name
+            self.world.robot = RB.load(self.robot_choice or RB.for_surface(self.base_layout.surface))
+            self._abort()
+            self._rebuild(self.base_layout)
+        except (RB.RobotError, A.ArmError, ValueError) as e:
+            self.world.robot, self.robot_choice = old, old_choice
+            self.log("system", f"Could not use that robot: {e}")
+            return self.say("I couldn't use that robot. I keep the one I have.")
+        r = self.world.robot
+        what = "an arm on a base that drives up to things" if r.mobile else "an arm fixed at the edge of the table"
+        self.say(f"Now I am {what}.")
 
     def name_props(self, props: list[dict], line: str):
         """The AI named the everyday objects (and their shapes) after the twin was already shown."""
@@ -534,7 +567,9 @@ class Sim:
                        "h": pr["size"][2]} for i, pr in enumerate(w.layout.props)],
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
-            "surface": dict(w.layout.surface), "arm": w.arm.name if hasattr(w, "arm") else None, "arm_size": float(w.arm.scale) if hasattr(w, "arm") else 1.0, "scale": float(self.base_layout.meta.get("scale", 1.0)),
+            "surface": dict(w.layout.surface),
+            "robot": {"name": w.robot.name, "mobile": w.robot.mobile, "auto": self.robot_choice is None} if hasattr(w, "robot") else None,
+            "arm": w.arm.name if hasattr(w, "arm") else None, "arm_size": float(w.arm.scale) if hasattr(w, "arm") else 1.0, "scale": float(self.base_layout.meta.get("scale", 1.0)),
             "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready(), "policy": self.policy is not None},
             "attempt": ((self.replay or {}).get("loop") or {}).get("attempts", 0) + 1 if self.mode == "move" and (self.replay or {}).get("loop") else None,
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,

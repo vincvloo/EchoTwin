@@ -253,13 +253,42 @@ def resize(spec: "mujoco.MjSpec", k: float, jaws: set | frozenset = frozenset())
             a.ctrlrange = a.ctrlrange * k
 
 
-def compose(scene: "mujoco.MjSpec", arm: ArmSpec, base_xy=(0.0, 0.0)) -> None:
-    """Attach the arm to `scene` with its base at base_xy on the table (z = 0) and add the `tool` site."""
+BASE_JOINTS = ("robot_x", "robot_y", "robot_yaw")       # a mobile base: drives along x and y, turns about z
+
+
+def add_mobile_base(scene: "mujoco.MjSpec", robot) -> "mujoco.MjsBody":
+    """A base that drives in any direction (two slides and a turn, held by position servos), seen from above as its
+    footprint. It does not touch the surface or the objects (contype 2): the planner keeps it clear of them."""
+    fx, fy = (v / 2 for v in robot.footprint)
+    h = max(robot.mount_height, 0.02)
+    b = scene.worldbody.add_body(name="robot_base", pos=[0, 0, 0])
+    for name, kind, axis in zip(BASE_JOINTS, (mujoco.mjtJoint.mjJNT_SLIDE, mujoco.mjtJoint.mjJNT_SLIDE, mujoco.mjtJoint.mjJNT_HINGE),
+                                ([1, 0, 0], [0, 1, 0], [0, 0, 1])):
+        b.add_joint(name=name, type=kind, axis=axis, damping=5.0 if kind == mujoco.mjtJoint.mjJNT_SLIDE else 0.5)
+    b.add_geom(name="robot_body", type=mujoco.mjtGeom.mjGEOM_BOX, size=[fx, fy, h / 2], pos=[0, 0, h / 2],
+               rgba=[0.22, 0.24, 0.28, 1], contype=2, conaffinity=2, density=600)
+    for k, ang in enumerate((90, 210, 330)):             # three wheels, for the look
+        a = np.radians(ang)
+        b.add_geom(name=f"robot_wheel_{k}", type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.035, 0.012, 0],
+                   pos=[0.8 * fx * np.cos(a), 0.8 * fy * np.sin(a), 0.035], euler=[90, 0, ang + 90],
+                   rgba=[0.1, 0.1, 0.1, 1], contype=2, conaffinity=2, density=300)
+    for name, kp in zip(BASE_JOINTS, (4000.0, 4000.0, 120.0)):
+        act = scene.add_actuator(name=name, target=name, trntype=mujoco.mjtTrn.mjTRN_JOINT)
+        act.set_to_position(kp=kp, dampratio=1.0)
+    return b
+
+
+def compose(scene: "mujoco.MjSpec", arm: ArmSpec, base_xy=(0.0, 0.0), robot=None) -> None:
+    """Attach the arm to `scene` with its base at base_xy on the table (z = 0) and add the `tool` site. With a mobile
+    `robot` (robots.py) the arm is mounted on a base that drives; the base joints then say where it is (x, y, turn)."""
     kid = child_spec(arm)
     for name in (arm.base_body, arm.tool["body"], *arm.joints):
         if kid.body(name) is None and kid.joint(name) is None:
             raise ArmError(f"The arm file has no body or joint called '{name}'.")
-    frame = scene.worldbody.add_frame(pos=[base_xy[0], base_xy[1], 0.0], euler=[0, 0, arm.mount_yaw_deg])
+    if robot is not None and robot.mobile:
+        frame = add_mobile_base(scene, robot).add_frame(pos=[0, 0, robot.mount_height], euler=[0, 0, arm.mount_yaw_deg])
+    else:
+        frame = scene.worldbody.add_frame(pos=[base_xy[0], base_xy[1], 0.0], euler=[0, 0, arm.mount_yaw_deg])
     scene.attach(kid, frame=frame, prefix=arm.prefix)
     scene.option.cone = mujoco.mjtCone.mjCONE_ELLIPTIC
     scene.option.impratio = 10
@@ -282,10 +311,16 @@ class ArmIK:
     horizontal along `yaw`. 5 joints, 6 constraints: position wins, orientation is the compromise.
     """
 
-    def __init__(self, model: "mujoco.MjModel", arm: ArmSpec, base_xy=(0.0, 0.0)):
+    def __init__(self, model: "mujoco.MjModel", arm: ArmSpec, base_xy=(0.0, 0.0), mount: float = 0.0):
         self.m, self.arm = model, arm
         self.base = np.array([base_xy[0], base_xy[1], 0.0])         # targets are in table coordinates
+        self.mount = float(mount)                                   # the arm's base this high above the surface
         self.scratch = mujoco.MjData(model)
+        ids = [mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, n) for n in BASE_JOINTS]
+        self.base_qadr = [int(model.jnt_qposadr[j]) for j in ids] if min(ids) >= 0 else []   # a mobile base
+        self.yaw = 0.0
+        if self.base_qadr:
+            self.set_base((base_xy[0], base_xy[1], 0.0))
         self.jid = [self._joint(n) for n in arm.joints]
         self.qadr = [model.jnt_qposadr[j] for j in self.jid]
         self.dadr = [model.jnt_dofadr[j] for j in self.jid]
@@ -296,6 +331,14 @@ class ArmIK:
         self.c_axis = _unit(arm.tool["close_axis"])
         self.q_home = np.array(arm.home, float)
         self.q_down = self.q_home.copy()
+
+    def set_base(self, pose):
+        """Where a mobile base stands (x, y, turn): the solver works on a copy of the robot standing there."""
+        if not self.base_qadr:
+            return
+        for a, v in zip(self.base_qadr, pose):
+            self.scratch.qpos[a] = v
+        self.base, self.yaw = np.array([pose[0], pose[1], 0.0]), float(pose[2])
 
     def _joint(self, name: str) -> int:
         j = mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_JOINT, self.arm.prefix + name)
@@ -387,7 +430,7 @@ class Workspace:
 
     @classmethod
     def for_arm(cls, ik: "ArmIK", arm: ArmSpec) -> "Workspace":
-        key = (arm.name, str(arm.source), arm.mount_yaw_deg, round(arm.scale, 4))
+        key = (arm.name, str(arm.source), arm.mount_yaw_deg, round(arm.scale, 4), round(ik.mount, 4))
         if key not in cls._cache:
             lo, hi = ik.lo[0], ik.hi[0]
             cls._cache[key] = cls(ik, float(min(abs(lo), abs(hi)) - 0.05), arm.scale)

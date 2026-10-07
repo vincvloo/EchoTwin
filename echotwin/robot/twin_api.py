@@ -144,6 +144,32 @@ async def twin_surface(body: dict):
     return JSONResponse({"ok": True})
 
 
+@router.get("/api/robots")
+async def robots():
+    from . import robots as RB
+    out = []
+    for n in RB.list_robots():
+        try:
+            r = RB.load(n)
+            out.append({"name": n, "about": r.about, "mobile": r.mobile})
+        except RB.RobotError:
+            continue
+    w = sim.world
+    return JSONResponse({"robots": out, "current": getattr(getattr(w, "robot", None), "name", None),
+                         "auto": sim.robot_choice is None, "can_switch": w.name == "sim"})
+
+
+@router.post("/api/robot")
+async def robot_switch(body: dict):
+    """{"name": "mobile_arm"} uses that robot; {"name": "auto"}: the one that fits the surface."""
+    from . import robots as RB
+    name = str(body.get("name") or "auto")
+    if name != "auto" and name not in RB.list_robots():
+        return JSONResponse({"ok": False, "error": "No such robot."})
+    sim.submit(sim.set_robot, name)
+    return JSONResponse({"ok": True})
+
+
 @router.get("/api/arms")
 async def arms():
     return JSONResponse({"arms": A.describe_arms(), "current": sim.world.arm.name if hasattr(sim.world, "arm") else None,

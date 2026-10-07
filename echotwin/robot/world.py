@@ -11,6 +11,7 @@ import mujoco
 import numpy as np
 
 from . import arm as A
+from . import robots as RB
 from .scene import Layout, build_xml
 
 CTRL_HZ = 20
@@ -32,20 +33,24 @@ class HandState:
     yaw: float = 0.0                                                   # direction the jaws close along
     q: np.ndarray = field(default_factory=lambda: np.zeros(5))        # joint setpoints
     held: str | None = None                                            # the object the pads squeeze right now
+    base: np.ndarray = field(default_factory=lambda: np.zeros(3))      # where the base stands: x, y, turn (a fixed one never moves)
+    drive: np.ndarray | None = None                                    # where a mobile base is driving to, or None
 
     @property
     def attached(self) -> str | None:
         return self.held
 
     def clone(self) -> "HandState":
-        return HandState(self.grip, self.target.copy(), self.yaw, self.q.copy(), self.held)
+        return HandState(self.grip, self.target.copy(), self.yaw, self.q.copy(), self.held, self.base.copy(),
+                         None if self.drive is None else self.drive.copy())
 
 
 class World:
     name = "sim"                      # the back-end this is (see backend.py)
 
-    def __init__(self, layout: Layout | None = None, arm: "A.ArmSpec | str | None" = None):
+    def __init__(self, layout: Layout | None = None, arm: "A.ArmSpec | str | None" = None, robot: "RB.RobotSpec | str | None" = None):
         self.arm = arm if isinstance(arm, A.ArmSpec) else A.load(arm)
+        self.robot = robot if isinstance(robot, RB.RobotSpec) else RB.load(robot)     # the base: fixed (default) or mobile
         self.layout = layout or Layout()
         self.build(self.layout)
 
@@ -54,15 +59,16 @@ class World:
         new_layout = layout.copy()
         base = self.base_xy(new_layout)
         spec = mujoco.MjSpec.from_string(build_xml(new_layout))
-        A.compose(spec, self.arm, base)
+        A.compose(spec, self.arm, base, self.robot)
         model = spec.compile()                      # raises before anything changes
         self.layout = new_layout
         self.model = model
         self.data = mujoco.MjData(model)
         m = model
         pre = self.arm.prefix
-        self.base = np.array(base)
-        self.ik = A.ArmIK(m, self.arm, base)
+        self.ik = A.ArmIK(m, self.arm, base, self.robot.mount_height if self.robot.mobile else 0.0)
+        self.base_act = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, n) for n in A.BASE_JOINTS] if self.ik.base_qadr else []
+        self.hand = HandState(base=np.array([base[0], base[1], 0.0]))
         self.act = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, pre + n) for n in self.arm.actuators]
         self.gact = [mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, pre + n) for n in self.arm.gripper["actuators"]]
         self.gdof = [int(m.jnt_dofadr[m.actuator_trnid[a][0]]) for a in self.gact]
@@ -78,19 +84,89 @@ class World:
         self._body_to_prop = {b: n for n, b in self.obj_body.items()}
         for a, v in zip(self.ik.qadr, self.arm.home):
             self.data.qpos[a] = v
+        for a, act, v in zip(self.ik.base_qadr, self.base_act, self.hand.base):
+            self.data.qpos[a], self.data.ctrl[act] = v, v
         mujoco.mj_forward(m, self.data)
         self.ik.seed_down((0.0, 0.22))
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
-        self.hand = HandState()
         self.go_rest(teleport=True)
 
+    # ---------- where the base stands ----------
+    @property
+    def mobile(self) -> bool:
+        return self.robot.mobile
+
+    @property
+    def base(self) -> np.ndarray:
+        """Where the arm's base stands (x, y) right now."""
+        return self.hand.base[:2]
+
+    @staticmethod
+    def _rel(xy, pose) -> np.ndarray:
+        """A table point seen from a base standing at `pose` (x, y, turn): ahead is +y."""
+        d = np.asarray(xy, float)[:2] - pose[:2]
+        if pose[2] == 0.0:
+            return d
+        c, s = np.cos(pose[2]), np.sin(pose[2])
+        return np.array([c * d[0] + s * d[1], -s * d[0] + c * d[1]])
+
+    @staticmethod
+    def _abs(rel, pose) -> np.ndarray:
+        """The other way round: a point seen from the base -> table coordinates."""
+        rel = np.asarray(rel, float)[:2]
+        if pose[2] == 0.0:
+            return rel + pose[:2]
+        c, s = np.cos(pose[2]), np.sin(pose[2])
+        return np.array([c * rel[0] - s * rel[1], s * rel[0] + c * rel[1]]) + pose[:2]
+
+    def standoff(self, xy, ignore: str | None = None, near=None) -> np.ndarray | None:
+        """Where a mobile base should stand to work on `xy`: facing it, at the middle of the arm's reach, its footprint
+        clear of the things on the table and the furniture (`ignore`: the object it works on). The spot nearest to
+        `near` (default: where the base is) comes first. None when there is no free spot."""
+        xy = np.asarray(xy, float)[:2]
+        near = self.hand.base[:2] if near is None else np.asarray(near, float)[:2]
+        body = 0.5 * float(np.hypot(*self.robot.footprint)) + 0.02
+        front = 0.5 * self.robot.footprint[1] + 0.05           # the arm cannot work under its own base
+        r = float(np.clip(0.5 * (self.workspace.r_min + self.workspace.r_max), front, self.workspace.r_max - 0.02))
+        home = float(np.arctan2(*(near - xy)[::-1]))
+        for k in sorted(range(24), key=lambda k: abs(np.angle(np.exp(1j * (2 * np.pi * k / 24 - home))))):
+            a = 2 * np.pi * k / 24
+            spot = xy + r * np.array([np.cos(a), np.sin(a)])
+            clear = all(np.hypot(*(self.obj_pos(n)[:2] - spot)) > body + self.radius(n)
+                        for n in self.things() if n != ignore)
+            clear = clear and all(np.hypot(*(np.asarray(o["pos"], float) - spot)) > body + max(o["size"][:2])
+                                  for o in self.layout.obstacles)
+            if clear:
+                d = xy - spot
+                return np.array([spot[0], spot[1], float(np.arctan2(-d[0], d[1]))])
+        return None
+
+    def _drive_tick(self, hs: HandState):
+        """Move a mobile base one control period towards hs.drive; the arm holds its joints. On arrival the tool target
+        is where the tool now is, so the next move starts from there."""
+        to = hs.drive
+        d = to[:2] - hs.base[:2]
+        n = float(np.linalg.norm(d))
+        step = self.robot.speed * CTRL_DT
+        dyaw = float(np.angle(np.exp(1j * (to[2] - hs.base[2]))))
+        turn = self.robot.turn * CTRL_DT
+        hs.base = np.array([*(to[:2] if n <= step else hs.base[:2] + d / n * step),
+                            to[2] if abs(dyaw) <= turn else hs.base[2] + np.sign(dyaw) * turn])
+        if n <= step and abs(dyaw) <= turn:
+            hs.drive = None
+            self.ik.set_base(hs.base)
+            hs.target = self.ik.pose(hs.q)[0]
+
     def base_xy(self, layout: Layout) -> tuple[float, float]:
-        """Where the arm's base stands: at the front edge, a bigger arm a little further in."""
+        """Where the arm's base stands: at the front edge, a bigger arm a little further in. A mobile base starts just in
+        front of the mapped area, so it never starts on top of the things."""
+        if self.robot.mobile:
+            return (0.0, -layout.table_half[1] - 0.5 * self.robot.footprint[1] - 0.05)
         return (0.0, -layout.table_half[1] + BASE_INSET * self.arm.scale)
 
     def rest_target(self) -> np.ndarray:
         r = 0.5 * (self.workspace.r_min + self.workspace.r_max)
-        return np.array([self.base[0], self.base[1] + r, REST_RISE])
+        return np.array([*self._abs((0.0, r), self.hand.base), REST_RISE])
 
     def half(self, name: str) -> float:
         """Half height (grasp height above the table)."""
@@ -114,12 +190,17 @@ class World:
 
     # ---------- what the arm can do ----------
     def reachable(self, xy, z: float = 0.02) -> bool:
-        return self.workspace.reachable(np.asarray(xy, float) - self.base, z)
+        return self.workspace.reachable(self._rel(xy, self.hand.base), z)
+
+    def reachable_from(self, pose, xy, z: float = 0.02) -> bool:
+        """Reachable if the base stood at `pose` (x, y, turn)."""
+        return self.workspace.reachable(self._rel(xy, np.asarray(pose, float)), z)
 
     def workspace_sample(self, rng) -> tuple[float, float]:
         """A random reachable spot on the table, in table coordinates."""
         rx, ry = self.workspace.sample(rng)
-        return (float(self.base[0] + rx), float(self.base[1] + ry))
+        x, y = self._abs((rx, ry), self.hand.base)
+        return (float(x), float(y))
 
     def grasp_width(self, name: str) -> float:
         """How far the jaws must open: the object's narrower horizontal side."""
@@ -174,11 +255,13 @@ class World:
             reach, most = dist(reach) / r_max, dist(most) / max(r_min, 1e-6)
         rel = obj - base1
         grasp = (width + GRIP_MARGIN) / opening
+        if self.mobile:                                     # the base drives up to it: only the jaws decide
+            reach, most = 0.0, 99.0
         k = max(grasp, reach)
         why = ""
         if thick < MIN_THICKNESS:
             why = f"it is only {thick * 1000:.0f} mm thick: no gripper pinches that from a table"
-        elif abs(np.arctan2(rel[0], rel[1])) > self.workspace.pan:
+        elif not self.mobile and abs(np.arctan2(rel[0], rel[1])) > self.workspace.pan:
             why = "it is beside the arm, where the base cannot turn"
         elif k > most:
             why = "an arm with jaws that wide could not bend down so close to its base"
@@ -191,6 +274,12 @@ class World:
         ok, why = self.can_grasp(name)
         if not ok:
             return why
+        if self.mobile:
+            if self.standoff(self.obj_pos(name)[:2], ignore=name) is None:
+                return "there is no free spot for me to stand next to it"
+            if goal_xy is not None and self.standoff(goal_xy, ignore=name) is None:
+                return "there is no free spot for me to stand next to that place"
+            return ""
         if not self.reachable(self.obj_pos(name)[:2]):
             return "it is out of my reach"
         if goal_xy is not None and not self.reachable(goal_xy):
@@ -246,14 +335,19 @@ class World:
         """Keep the wanted tool position where the arm can go: on the table, inside its reach."""
         th = self.layout.table_half
         t = np.array([np.clip(target[0], -th[0] + 0.02, th[0] - 0.02), np.clip(target[1], -th[1] + 0.02, th[1] - 0.02), target[2]])
-        rel = self.workspace.clamp(t - np.array([self.base[0], self.base[1], 0.0]), Z_MIN)
-        return rel + np.array([self.base[0], self.base[1], 0.0])
+        rel = self.workspace.clamp(np.array([*self._rel(t, hs.base), t[2]]), Z_MIN)
+        return np.array([*self._abs(rel[:2], hs.base), rel[2]])
 
     def command(self, action, hs: HandState | None = None) -> np.ndarray:
         """The controller half of a tick: the wanted tool motion -> joint setpoints (hs.q is updated and returned).
         action = (vx, vy, vz, grip in {0,1}[, yaw of the jaws]); the same for every back-end."""
         hs = hs if hs is not None else self.hand
         a = np.asarray(action, dtype=float)
+        if hs.drive is not None:                    # a mobile base is driving: the arm holds still
+            hs.grip = bool(a[3] > 0.5)
+            self._drive_tick(hs)
+            return hs.q
+        self.ik.set_base(hs.base)
         v = np.clip(a[:3], -VMAX, VMAX)
         if len(a) > 4:
             hs.yaw = float(a[4])
@@ -269,6 +363,8 @@ class World:
         q = hs.q if q is None else q
         grip = hs.grip if grip is None else grip
         for act, val in zip(self.act, q):
+            d.ctrl[act] = val
+        for act, val in zip(self.base_act, hs.base):
             d.ctrl[act] = val
         key = "closed" if grip else "open"
         for act, val in zip(self.gact, self.arm.gripper[key]):
@@ -315,9 +411,9 @@ class World:
         out to the side of the base opposite to that spot, so the arm does not hide what is looked at or pass low over it."""
         r = self.workspace.r_min + 0.03
         if away_from is None:
-            return np.array([self.base[0], self.base[1] + r, 0.06])
-        side = -1.0 if away_from[0] >= self.base[0] else 1.0       # high and to the side: nothing low to sweep through objects
-        return np.array([self.base[0] + side * 0.20, self.base[1] + 0.10, self.carry_height()])
+            return np.array([*self._abs((0.0, r), self.hand.base), 0.06])
+        side = -1.0 if self._rel(away_from, self.hand.base)[0] >= 0 else 1.0   # high and to the side: nothing low to sweep through
+        return np.array([*self._abs((side * 0.20, 0.10), self.hand.base), self.carry_height()])
 
     def observe(self, name: str):
         """Look at an object: its table position (x, y), or None when it cannot be seen. The simulation is its own truth."""
@@ -363,6 +459,9 @@ class World:
         hs.grip = False
         hs.held = None
         if teleport:
+            self.ik.set_base(hs.base)
+            for a, v in zip(self.ik.base_qadr, hs.base):
+                d.qpos[a] = v
             q, _, _ = self.ik.solve(hs.target, 0.0, self.ik.q_down, iters=300)
             hs.q = q.copy()
             hs.yaw = 0.0
