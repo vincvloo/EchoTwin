@@ -455,11 +455,16 @@ function placePad(st) {   // one drive pad: in the Teach step while teaching, in
   const pad = $('#pad'), want = st === 'teach' ? $('#teachSlot') : $('#advSlot');
   if (pad.parentElement !== want) want.appendChild(pad);
 }
+// naming: the AI is still at it, or it has answered and the robot has not put the names on its objects yet
+const naming = () => !!(lastScan && (lastScan.naming || (lastScan.props || []).some(n => !unnamed(n))));
+const unnamed = n => /^object \d+$/.test(n);     // the placeholder name until the AI has answered
 function renderAsk() {
-  const names = (state?.props || []).map(p => p.name);
-  $('#seen').innerHTML = names.length ? names.map((n, i) => `<button class="chip" data-fill="${esc(n)}" title="Add to the message">${i + 1} · ${esc(n)}</button>`).join('')
+  const names = (state?.props || []).map(p => p.name), wait = naming();
+  $('#seen').innerHTML = names.length ? names.map((n, i) => wait && unnamed(n)
+      ? `<button class="chip dim" data-fill="${esc(n)}" title="The AI is still naming it; you can say ${esc(n)} meanwhile">${i + 1} · naming…</button>`
+      : `<button class="chip" data-fill="${esc(n)}" title="Add to the message">${i + 1} · ${esc(n)}</button>`).join('')
     : '<span class="dim">Nothing yet.</span>';
-  const ideas = names.length ? [`Put the ${names[0]} next to the ${names[1] || names[0]}`, names[1] ? `Move the ${names[1]} to the left` : `Move the ${names[0]} to the left`] : [];
+  const ideas = names.length && !(wait && names.every(unnamed)) ? [`Put the ${names[0]} next to the ${names[1] || names[0]}`, names[1] ? `Move the ${names[1]} to the left` : `Move the ${names[0]} to the left`] : [];
   $('#ideas').innerHTML = [...ideas, 'What do you see?', 'How sure are you?'].map(t => `<button class="chip" data-idea="${esc(t)}">${esc(t)}</button>`).join('');
   $('#seen').querySelectorAll('[data-fill]').forEach(b => b.onclick = () => { const t = $('#txt'); t.value = (t.value + ' ' + b.dataset.fill).trim(); t.focus(); });
   $('#ideas').querySelectorAll('[data-idea]').forEach(b => b.onclick = () => sayText(b.dataset.idea));
@@ -523,7 +528,7 @@ function onScan(m) {
   if (m.stage === 'everyday') { setScanning(true); $('#pipeFill').style.width = '60%'; t.textContent = 'Finding the objects in the photo…'; }
   if (m.stage === 'pipeline') onPipeline(m);
   if (m.stage === 'done') { setScanning(false); $('#pipeFill').style.width = '0'; lastScan = m.summary; renderScan(m.summary); renderAsk(); setTimeout(loadTwin, 800); }
-  if (m.stage === 'error') { setScanning(false); toast('Scan failed: ' + m.error, 'bad'); }
+  if (m.stage === 'error') { setScanning(false); if (lastScan) lastScan.naming = false; renderAsk(); toast('Scan failed: ' + m.error, 'bad'); }
 }
 function onPipeline(m) {
   const running = m.state === 'running';
