@@ -40,9 +40,18 @@ Checked in the simulation: on a floor of 2 x 1.6 m the mobile robot drives to a 
 place on the other side and puts it down 0.6 cm from the spot (`tests/robot/test_robots.py`). The table-top arm gives exactly
 the same demos, messages and object positions as before (a scripted session compared before and after).
 
+## Driving it by hand
+
+On a robot with wheels, the phone's Drive tab and the dashboard's drive pad have a switch: "Move the arm" or "Drive the
+base". Driving the base, the joystick (or W/S, A/D) moves it forward, back and sideways in its own frame and the two buttons
+(or Q/E) turn it; the arm holds still and rides along. It stops before driving further into a thing or more than half a
+metre off the mapped area (the phone buzzes once a second while blocked); turning on the spot always works. The page sends
+`{"t": "drive", "forward", "sideways", "turn"}` (each -1 to 1) twenty times a second and the base stops by itself half a
+second after the last one. Teaching on the floor: drive up to the thing, switch back to the arm, show the move.
+
 ## Not done yet
 
-- Driving by hand from the phone (teaching on the floor uses the arm from where the base stands).
+- A demo recorded while you drive the base keeps only the arm's motion (the base moves are not in the action).
 - A two-wheel base that cannot slide sideways (would need path planning with turns).
 - Things on two heights at once (a table and the floor): one surface per scene.
 - A real robot: nothing here has run on hardware. LeRobot's LeKiwi (an SO-100/101 arm on a three-wheel base) is the closest

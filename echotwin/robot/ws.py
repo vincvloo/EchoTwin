@@ -49,12 +49,15 @@ async def ws_endpoint(ws: WebSocket):
         clients.pop(ws, None)
         if role == "phone":
             sim.submit(sim.set_human, 0, 0, 0)
+            sim.submit(sim.set_drive, 0, 0, 0)
 
 
 async def on_message(m: dict, role: str):
     t = m.get("t")
     if t == "ctl":
         sim.set_human(m.get("vx", 0), m.get("vy", 0), m.get("vz", 0))
+    elif t == "drive":                          # a mobile base driven by hand: forward, sideways, turn (-1..1)
+        sim.set_drive(m.get("forward", 0), m.get("sideways", 0), m.get("turn", 0))
     elif t == "grip":
         sim.submit(sim.set_grip, bool(m.get("on")))
     elif t == "say":

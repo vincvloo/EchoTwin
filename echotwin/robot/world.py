@@ -141,6 +141,37 @@ class World:
                 return np.array([spot[0], spot[1], float(np.arctan2(-d[0], d[1]))])
         return None
 
+    def _overlap(self, xy, ignore: str | None = None) -> float:
+        """How far a base standing at `xy` cuts into the things and the furniture (0: it touches nothing)."""
+        body = 0.5 * float(np.hypot(*self.robot.footprint)) + 0.02
+        cuts = [body + self.radius(n) - float(np.hypot(*(self.obj_pos(n)[:2] - xy))) for n in self.things() if n != ignore]
+        cuts += [body + max(o["size"][:2]) - float(np.hypot(*(np.asarray(o["pos"], float) - xy))) for o in self.layout.obstacles]
+        return max([0.0, *cuts])
+
+    def drive_by(self, forward: float, sideways: float, turn: float, hs: HandState | None = None) -> bool:
+        """Drive a mobile base by hand for one control period: forward, sideways and turn are -1..1 of its speed and
+        turn rate, in the base's own frame. The arm holds its joints and rides along. It does not drive further into
+        a thing or off the mapped area (plus half a metre); returns False when it stopped for that."""
+        hs = hs if hs is not None else self.hand
+        if not self.mobile:
+            return False
+        f, sd, t = (float(np.clip(v, -1, 1)) for v in (forward, sideways, turn))
+        step = self.robot.speed * CTRL_DT
+        pose = hs.base.copy()
+        xy = self._abs((sd * step, f * step), pose)
+        yaw = pose[2] + t * self.robot.turn * CTRL_DT
+        th = self.layout.table_half
+        inside = abs(xy[0]) <= th[0] + 0.5 and abs(xy[1]) <= th[1] + 0.5
+        worse = self._overlap(xy, hs.held) > self._overlap(pose[:2], hs.held) + 1e-9
+        if not inside or worse:
+            if t == 0.0:
+                return False
+            xy = pose[:2]                                   # turning on the spot is always fine
+        hs.base = np.array([xy[0], xy[1], yaw])
+        self.ik.set_base(hs.base)
+        hs.target = self.ik.pose(hs.q)[0]                   # the tool moved with the base
+        return bool(inside and not worse)
+
     def _drive_tick(self, hs: HandState):
         """Move a mobile base one control period towards hs.drive; the arm holds its joints. On arrival the tool target
         is where the tool now is, so the next move starts from there."""
