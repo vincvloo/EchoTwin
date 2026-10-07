@@ -77,6 +77,7 @@ def _f(*v) -> str:
     return " ".join(f"{x:.4f}" for x in v)
 
 
+BUMPS = 'contype="5" conaffinity="5"'   # bit 1: everything as before; bit 4: a mobile base bumps into it (arm.add_mobile_base)
 ATLAS_SUFFIX = "_cube.png"    # a skin with this name holds the six faces (3 rows x 4 columns), see features/everyday.cube_atlas
 
 
@@ -161,14 +162,14 @@ def build_xml(layout: Layout) -> str:
             look = f'rgba="{_f(r, g, b)} {alpha}"'
         props.append(f'<body name="prop_{i}" pos="{_f(pr["pos"][0], pr["pos"][1], hz + 0.0005)}" euler="0 0 {pr.get("yaw", 0):.1f}">'
                      f'<freejoint name="prop_{i}"/>'
-                     f'<geom {geom} {look} mass="{prop_mass(pr):.4f}" friction="1.5 0.05 0.01" condim="6"/></body>')
+                     f'<geom {geom} {look} mass="{prop_mass(pr):.4f}" friction="1.5 0.05 0.01" condim="6" {BUMPS}/></body>')
 
     fixed = []
     for i, ob in enumerate(layout.obstacles):
         hx, hy, hz = ob["size"]
         r, g, b = ob["rgb"]
         shape = f'type="cylinder" size="{_f((hx + hy) / 2, hz)}"' if ob.get("shape") == "cylinder"             else f'type="box" size="{_f(hx, hy, hz)}"'
-        fixed.append(f'<geom name="obstacle_{i}" {shape} pos="{_f(ob["pos"][0], ob["pos"][1], hz)}" '
+        fixed.append(f'<geom name="obstacle_{i}" {shape} {BUMPS} pos="{_f(ob["pos"][0], ob["pos"][1], hz)}" '
                      f'euler="0 0 {ob.get("yaw", 0):.1f}" rgba="{_f(r, g, b)} 0.4"/>')
 
     scenery = []
