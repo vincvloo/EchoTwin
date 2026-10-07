@@ -266,6 +266,12 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
       <div class="btns" style="margin-top:10px"><button class="ghost" id="capinfoBtn" aria-haspopup="dialog">Photos, Scaniverse or LiDAR?</button></div>
     </div>
     <div class="card wide" id="sizeCard">
+      <h3>Robot</h3>
+      <div class="btns">
+        <select id="robotSel" aria-label="Robot"></select>
+        <button id="robotApply">Use this robot</button>
+      </div>
+      <p class="dim small" id="robotAbout" style="margin:8px 0 18px"></p>
       <h3>Arm size: what would it take?</h3>
       <p class="dim small" style="margin:0 0 10px">Change the arm's size to see which objects it could pick up, and how big it must be for each. The table and the objects keep their sizes.</p>
       <div class="btns">
@@ -464,6 +470,7 @@ function renderState() {
   $('#ctrl').textContent = s.authority === 'robot' ? s.name : 'You';
   showScale(s);
   showSurface(s.surface);
+  showRobot(s.robot);
   $('#stepTitle').textContent = st === 'ask' && s.name ? `Say what ${s.name} should move` : step.title;
   $('#stepNo').innerHTML = step.n ? `Step ${Math.min(step.n, 4)} of 4` : '&nbsp;';
   document.querySelectorAll('#stepDots i').forEach((d, i) => { d.className = step.n && i + 1 < step.n ? 'done' : step.n === i + 1 ? 'now' : ''; });
@@ -748,6 +755,36 @@ $('#sizeApply').onclick = () => {
   if (!(w > 0)) return toast('Type the real width of the object in cm.', 'bad');
   rescale({ object: +$('#sizeObj').value, width_cm: w }, 'Sizes updated.');
 };
+// ---------- which robot ----------
+let robotList = [];
+function loadRobots() {
+  fetch('/api/robots').then(r => r.json()).then(r => {
+    robotList = r.robots;
+    $('#robotSel').innerHTML = '<option value="auto">Fits the surface (automatic)</option>' +
+      robotList.map(x => `<option value="${esc(x.name)}">${esc(x.name.replace('_', ' '))}${x.mobile ? ' (drives)' : ''}</option>`).join('');
+    $('#robotSel').disabled = $('#robotApply').disabled = !r.can_switch;
+    showRobot(state?.robot); showRobotAbout();
+  }).catch(() => {});
+}
+function showRobot(rb) {
+  if (!rb || document.activeElement === $('#robotSel')) return;
+  const want = rb.auto ? 'auto' : rb.name;
+  if ($('#robotSel').value !== want || showRobot.name !== rb.name) {
+    $('#robotSel').value = want; showRobot.name = rb.name; showRobotAbout();
+  }
+}
+function showRobotAbout() {
+  const v = $('#robotSel').value, cur = state?.robot?.name;
+  const r = robotList.find(x => x.name === (v === 'auto' ? cur : v));
+  $('#robotAbout').textContent = r ? (v === 'auto' ? `Now: ${r.name.replace('_', ' ')}. ` : '') + r.about : '';
+}
+$('#robotSel').onchange = showRobotAbout;
+$('#robotApply').onclick = async () => {
+  const r = await api('/api/robot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: $('#robotSel').value }) });
+  if (r && !r.ok) toast(r.error, 'bad'); else if (r) toast('Changing the robot… this takes a few seconds.');
+};
+loadRobots();
+
 // ---------- what the things stand on ----------
 function showSurface(sf) {
   if (!sf) return;

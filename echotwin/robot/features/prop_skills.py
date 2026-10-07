@@ -117,9 +117,27 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
         carry = float(min(max(carry, release_z + 0.05), carry_max))
     ox, oy = o[0] + off[0], o[1] + off[1]          # the tool stands beside the object for a single-jaw gripper
     gx, gy = goal[0] + off[0], goal[1] + off[1]
-    return [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
-            ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
-            ("move", [gx, gy, carry])]
+    steps = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
+             ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
+             ("move", [gx, gy, carry])]
+    return with_drives(world, steps, (ox, oy), (gx, gy), me) if getattr(world, "mobile", False) else steps
+
+
+def with_drives(world: World, steps: list, pick, place, me: str) -> list:
+    """A mobile base drives first when the object, or later the place, is out of the arm's reach from where it stands:
+    drive, stop, then the arm moves as on a fixed base."""
+    pose = world.hand.base.copy()
+    out = list(steps)
+    if not world.reachable_from(pose, pick):
+        at = world.standoff(pick, ignore=me)
+        if at is not None:
+            out.insert(0, ("drive", at.tolist()))
+            pose = at
+    if not world.reachable_from(pose, place):
+        at = world.standoff(place, ignore=me, near=pose[:2])
+        if at is not None:
+            out.insert(out.index(("grip", 1.0)) + 2, ("drive", at.tolist()))     # after lifting it
+    return out
 
 
 # ---------------- the closed loop: look, check, retry ----------------
@@ -333,6 +351,12 @@ def waypoint_action(world: World, r: dict, d=None, hs=None):
     if r["i"] >= len(r["wps"]):
         return None
     kind, arg = r["wps"][r["i"]]
+    if kind == "drive":                                     # a mobile base drives there; the arm holds still meanwhile
+        if hs.drive is None and r.get("driving"):
+            r["i"], r["driving"] = r["i"] + 1, False
+        elif not r.get("driving"):
+            hs.drive, r["driving"] = np.asarray(arg, float), True
+        return np.array([0, 0, 0, 1.0 if hs.grip else 0.0, r.get("yaw", 0.0)])
     if kind == "observe":
         return _observe(world, r)
     if kind == "align":

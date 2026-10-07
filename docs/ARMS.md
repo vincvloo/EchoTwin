@@ -1,5 +1,7 @@
 # Arms: use the one you have
 
+An arm sits on a base: fixed at the table edge, or on wheels. Robots (a base and an arm) are in `docs/ROBOTS.md`.
+
 The simulated robot is an arm with a two-pad gripper. The arm is not hard-coded: a small JSON file describes it, and
 `echotwin/robot/arm.py` builds it into the scene. Pick one with `ARM=` in `.env`.
 

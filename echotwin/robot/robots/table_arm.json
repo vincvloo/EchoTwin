@@ -1,0 +1,7 @@
+{
+  "name": "table_arm",
+  "about": "An arm clamped to the front edge of the table, as on a desk. It cannot move its base: things must be within its reach.",
+  "base": {"kind": "fixed"},
+  "arm": "builtin",
+  "arm_size": 1.0
+}

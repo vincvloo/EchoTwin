@@ -1,0 +1,7 @@
+{
+  "name": "mobile_arm",
+  "about": "The same arm on a small base with wheels that can drive in any direction (like LeRobot's LeKiwi). It drives up to a thing, stops, and picks it up; for things on the floor.",
+  "base": {"kind": "mobile", "footprint_cm": [26, 26], "mount_height_cm": 12, "speed_cm_s": 20, "turn_deg_s": 90},
+  "arm": "builtin",
+  "arm_size": 1.0
+}
