@@ -94,6 +94,10 @@ table.edit td{padding:3px 4px} table.edit input.name{min-width:150px}
 dialog .in{padding:18px 20px 20px;display:flex;flex-direction:column;gap:14px}
 dialog .close{align-self:flex-end;margin-bottom:-8px}
 #qr{background:#fff;padding:8px;border-radius:8px;width:180px;height:180px}
+.armsize{display:flex;justify-content:space-between;font-weight:600}
+#armSize{width:100%;accent-color:var(--accent)}
+#needList{list-style:none;padding:0;margin:8px 0 12px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+#needList li.no{color:var(--dim)} #needList li.ok b{color:var(--accent)}
 #toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:20;width:min(92vw,460px)}
 .toast{padding:12px 16px;border-radius:var(--radius-sm);background:var(--text);color:var(--bg);font-weight:600;box-shadow:0 6px 24px #0005}
 .toast.bad{background:var(--stop);color:var(--on-stop)}
@@ -133,6 +137,7 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
       <div class="dots" id="stepDots"><i></i><i></i><i></i><i></i></div>
       <h2 id="stepTitle">Connecting</h2>
       <div class="says" id="says" hidden></div>
+      <div class="actions" id="sizeHelp" hidden><button class="ghost" id="sizeHelpBtn">What arm size would grab it?</button></div>
 
       <div class="panel" id="p-connecting"><p class="dim">Waiting for the robot server…</p></div>
 
@@ -166,7 +171,7 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
         <div><div class="eyebrow">Pip sees</div><div class="chips" id="seen" style="margin-top:8px"></div></div>
         <div><div class="eyebrow">Try saying</div><div class="chips" id="ideas" style="margin-top:8px"></div></div>
         <p class="dim small" id="calNote"></p>
-        <div class="actions"><button class="ghost" id="fixSizes">Fix sizes</button><button class="ghost" id="rescanBtn">Scan a different table</button></div>
+        <div class="actions"><button class="ghost" id="fixSizes">Sizes and arm</button><button class="ghost" id="rescanBtn">Scan a different table</button></div>
       </div>
 
       <div class="panel" id="p-watch" hidden>
@@ -253,21 +258,30 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
       <div class="btns" style="margin-top:10px"><button class="ghost" id="capinfoBtn" aria-haspopup="dialog">Photos, Scaniverse or LiDAR?</button></div>
     </div>
     <div class="card wide" id="sizeCard">
-      <h3>Sizes and arm</h3>
-      <p class="dim small" style="margin:0 0 10px">Sizes from photos are estimates. Say how wide one object really is and the whole table is rescaled to match. Making Pip bigger or smaller is the same thing: the table shrinks or grows next to the arm.</p>
-      <div class="btns">
-        <select id="sizeObj" aria-label="Which object"></select>
-        <input type="number" id="sizeCm" step="0.5" min="0.5" placeholder="real width, cm" style="width:150px" aria-label="Its real width in centimetres">
-        <button class="primary" id="sizeApply">Rescale</button>
-        <button id="pipBigger" title="Pip looks 25 % bigger: the table gets smaller">Pip bigger</button>
-        <button id="pipSmaller" title="Pip looks 20 % smaller: the table gets bigger">Pip smaller</button>
-      </div>
-      <p class="dim small" id="scaleNow" style="margin:8px 0 14px"></p>
+      <h3>Arm size: what would it take?</h3>
+      <p class="dim small" style="margin:0 0 10px">Change the arm's size to see which objects it could pick up, and how big it must be for each. The table and the objects keep their sizes.</p>
       <div class="btns">
         <select id="armSel" aria-label="Robot arm"></select>
         <button id="armApply">Switch arm</button>
       </div>
-      <p class="dim small" id="armAbout" style="margin:8px 0 0"></p>
+      <p class="dim small" id="armAbout" style="margin:8px 0 12px"></p>
+      <label class="armsize" for="armSize"><span>Arm size</span><b id="armSizeTxt">×1.00</b></label>
+      <input type="range" id="armSize" min="0.75" max="4" step="0.05" value="1" aria-describedby="armSpecs">
+      <p class="small" id="armSpecs" style="margin:6px 0"></p>
+      <ul id="needList"></ul>
+      <div class="btns">
+        <button class="primary" id="armSizeApply">Use this size</button>
+        <button id="armSizeAll">Size for all objects</button>
+        <button class="ghost" id="armSizeReset">Back to its real size</button>
+      </div>
+      <h3 style="margin-top:22px">Object sizes</h3>
+      <p class="dim small" style="margin:0 0 10px">Sizes from one photo are estimates. If you know how wide one object really is, the whole table is rescaled to match.</p>
+      <div class="btns">
+        <select id="sizeObj" aria-label="Which object"></select>
+        <input type="number" id="sizeCm" step="0.5" min="0.5" placeholder="real width, cm" style="width:150px" aria-label="Its real width in centimetres">
+        <button id="sizeApply">Rescale the table</button>
+      </div>
+      <p class="dim small" id="scaleNow" style="margin:8px 0 0"></p>
     </div>
     <div class="card wide">
       <h3>Twin editor</h3>
@@ -445,6 +459,7 @@ function renderState() {
   $('#stepNo').innerHTML = step.n ? `Step ${Math.min(step.n, 4)} of 4` : '&nbsp;';
   document.querySelectorAll('#stepDots i').forEach((d, i) => { d.className = step.n && i + 1 < step.n ? 'done' : step.n === i + 1 ? 'now' : ''; });
   for (const p of document.querySelectorAll('.panel')) p.hidden = p.id !== 'p-' + st;
+  if (st !== 'ask') $('#sizeHelp').hidden = true;
   $('#backRow').hidden = !(st === 'scan' && forceScan);
   placePad(st);
   if (st === 'watch') renderWatch(); else if (st === 'teach') renderTeach(); else if (st === 'review') renderReview();
@@ -470,7 +485,7 @@ function renderAsk() {
   $('#ideas').querySelectorAll('[data-idea]').forEach(b => b.onclick = () => sayText(b.dataset.idea));
   const c = lastScan && lastScan.calibration;
   $('#calNote').textContent = !lastScan ? '' : c && c.source === 'marker' ? `Sizes measured with the marker (${c.photos_seen} of ${c.photos_total} photos).`
-    : 'Sizes are estimated (no marker on the table), so they can be off by a factor of two. Print the marker for true size.';
+    : 'Sizes are estimated from the photo. Too big for my gripper? See what arm size it would take.';
 }
 function renderWatch() {
   const t = state.task;
@@ -497,6 +512,7 @@ function renderReview() {
 function renderDecision() {
   const m = lastDecision; if (!m) return;
   if (m.kind === 'refuse') setSays(`I can't do that: ${m.why}.`, 'warn');
+  $('#sizeHelp').hidden = m.kind !== 'refuse';
   if (state) renderState();
 }
 function renderSkills() {
@@ -527,6 +543,8 @@ function onScan(m) {
   if (m.stage === 'processing') { setScanning(true); t.textContent = `Processing ${m.frames} frames…`; }
   if (m.stage === 'everyday') { setScanning(true); $('#pipeFill').style.width = '60%'; t.textContent = 'Finding the objects in the photo…'; }
   if (m.stage === 'pipeline') onPipeline(m);
+  if (m.stage === 'done') { setTimeout(loadNeeds, 1500); setScanning(false); $('#pipeFill').style.width = '0'; lastScan = m.summary; renderScan(m.summary); renderAsk(); setTimeout(loadTwin, 800); }
+  if (m.stage === 'error') { setScanning(false); toast('Scan failed: ' + m.error, 'bad'); }
   if (m.stage === 'done') { setScanning(false); $('#pipeFill').style.width = '0'; lastScan = m.summary; renderScan(m.summary); renderAsk(); setTimeout(loadTwin, 800); }
   if (m.stage === 'error') { setScanning(false); if (lastScan) lastScan.naming = false; renderAsk(); toast('Scan failed: ' + m.error, 'bad'); }
 }
@@ -700,7 +718,10 @@ setInterval(() => {
 // ---------- sizes and arm ----------
 function showScale(s) {
   const k = s.scale || 1;
-  $('#scaleNow').textContent = Math.abs(k - 1) < 0.005 ? 'Sizes are as the photo said.' : `The table is ${k.toFixed(2)} times what the photo said (Pip looks ${(1 / k).toFixed(2)} times its first size).`;
+  $('#scaleNow').textContent = Math.abs(k - 1) < 0.005 ? 'Sizes are as the photo estimated.' : `The table is ${k.toFixed(2)} times what the photo estimated.`;
+  if (s.arm_size !== showScale.armSize || s.arm !== showScale.arm || k !== showScale.k) {   // the arm or the table changed: sizes needed change
+    showScale.armSize = s.arm_size; showScale.arm = s.arm; showScale.k = k; loadNeeds();
+  }
   if (s.arm && $('#armSel').value !== s.arm && document.activeElement !== $('#armSel')) $('#armSel').value = s.arm;
 }
 function fillSizeObjects() {
@@ -720,9 +741,51 @@ $('#sizeApply').onclick = () => {
   if (!(w > 0)) return toast('Type the real width of the object in cm.', 'bad');
   rescale({ object: +$('#sizeObj').value, width_cm: w }, 'Sizes updated.');
 };
-$('#pipBigger').onclick = () => rescale({ factor: 0.8 }, 'Pip looks bigger.');
-$('#pipSmaller').onclick = () => rescale({ factor: 1.25 }, 'Pip looks smaller.');
-$('#fixSizes').onclick = () => { $('#adv').open = true; $('#sizeCard').scrollIntoView({ behavior: 'smooth' }); };
+// ---------- arm size: what would it take ----------
+let needs = null;
+async function loadNeeds() {
+  const r = await api('/api/arm/needed');
+  if (!r || !r.ok) return;
+  needs = r;
+  const sl = $('#armSize');
+  sl.min = r.range[0]; sl.max = r.range[1];
+  if (document.activeElement !== sl) sl.value = r.size;
+  showNeeds();
+}
+function showNeeds() {
+  if (!needs) return;
+  const k = +$('#armSize').value, [lo, hi] = needs.range;
+  $('#armSizeTxt').textContent = '×' + k.toFixed(2);
+  $('#armSpecs').textContent = `Jaws open ${(needs.opening_cm * k).toFixed(0)} cm · reaches ${(needs.reach_cm[0] * k).toFixed(0)} to ${(needs.reach_cm[1] * k).toFixed(0)} cm from its base`;
+  $('#needList').innerHTML = needs.objects.map(o => {
+    const ok = o.needed !== null && k >= o.needed - 1e-9 && k <= o.most;
+    const why = o.needed === null ? esc(o.why) : o.needed > hi ? `needs ×${o.needed.toFixed(2)}, more than this arm can be` :
+      k > o.most ? `too big: an arm this size cannot bend down to it (×${o.most.toFixed(2)} at most)` : `needs ×${o.needed.toFixed(2)}`;
+    return `<li class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'} <b>${esc(o.name)}</b> (${o.width_cm} cm wide): ${why}</li>`;
+  }).join('') || '<li class="no">No objects yet: scan a table first.</li>';
+  const all = needs.all;
+  $('#armSizeAll').disabled = all === null || all > hi;
+  const some = needs.objects.some(o => o.needed === null), what = some ? 'every object it can grab' : 'all objects';
+  $('#armSizeAll').textContent = all === null ? 'No single size grabs them' : all > hi ? `They need ×${all.toFixed(2)}, more than it can be` : `Size for ${what} (×${Math.max(lo, all).toFixed(2)})`;
+  $('#armSizeApply').disabled = Math.abs(k - (state?.arm_size || 1)) < 0.005;
+  $('#armSizeReset').disabled = Math.abs((state?.arm_size || 1) - 1) < 0.005;
+}
+async function resizeArm(k) {
+  const r = await api('/api/arm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ size: k }) });
+  if (r && !r.ok) toast(r.error, 'bad'); else if (r) toast('Resizing the arm… this takes a few seconds.');
+}
+$('#armSize').oninput = showNeeds;
+$('#armSizeApply').onclick = () => resizeArm(+$('#armSize').value);
+$('#armSizeAll').onclick = () => {
+  if (!needs || needs.all === null) return;
+  const k = Math.min(+needs.range[1], Math.max(+needs.range[0], Math.ceil(needs.all * 20) / 20));   // round up to the slider's step
+  $('#armSize').value = k; showNeeds(); resizeArm(k);
+};
+$('#armSizeReset').onclick = () => { $('#armSize').value = 1; showNeeds(); resizeArm(1); };
+const openSizes = () => { $('#adv').open = true; loadNeeds(); $('#sizeCard').scrollIntoView({ behavior: 'smooth' }); };
+$('#sizeHelpBtn').onclick = openSizes;
+$('#adv').addEventListener('toggle', () => { if ($('#adv').open) loadNeeds(); });
+$('#fixSizes').onclick = openSizes;
 let armList = [];
 fetch('/api/arms').then(r => r.json()).then(r => {
   armList = r.arms;

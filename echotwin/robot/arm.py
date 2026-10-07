@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import urllib.request
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -102,6 +102,7 @@ class ArmSpec:
     download: dict | None = None
     real: dict | None = None        # servo ids and calibration for a real arm (see feetech.py)
     source: Path | None = None
+    scale: float = 1.0              # the arm k times its described size (see sized and resize)
 
     @property
     def mjcf_path(self) -> Path | None:
@@ -109,6 +110,16 @@ class ArmSpec:
             return None
         p = Path(self.mjcf)
         return p if p.is_absolute() else REPO / p
+
+    def sized(self, scale: float) -> "ArmSpec":
+        """The same arm at `scale` times its described size: tool point, jaw travel (parallel jaws slide, so their
+        travel is a length; a single jaw turns, so its angles stay) and the opening it can hold."""
+        k = float(scale) / self.scale
+        g = dict(self.gripper)
+        if g["mode"] == "parallel":
+            g["open"], g["closed"] = [v * k for v in g["open"]], [v * k for v in g["closed"]]
+        return replace(self, scale=float(scale), gripper=g, tool={**self.tool, "pos": [v * k for v in self.tool["pos"]]},
+                       max_opening=(self.max_opening or 0.08) * k)
 
     def missing_files(self) -> list[Path]:
         if self.mjcf == "builtin":
@@ -176,12 +187,70 @@ def parse(d: dict, source: Path | None = None) -> ArmSpec:
 # ---------------- putting the arm into a scene ----------------
 def child_spec(arm: ArmSpec) -> "mujoco.MjSpec":
     if arm.mjcf == "builtin":
-        return mujoco.MjSpec.from_string(BUILTIN_MJCF)
-    missing = arm.missing_files()
-    if missing:
-        raise ArmError(f"The arm '{arm.name}' is missing {len(missing)} file(s), e.g. {missing[0]}. "
-                       f"Fetch it with: python -m echotwin.robot.arm --download {arm.name}")
-    return mujoco.MjSpec.from_file(str(arm.mjcf_path))
+        kid = mujoco.MjSpec.from_string(BUILTIN_MJCF)
+    else:
+        missing = arm.missing_files()
+        if missing:
+            raise ArmError(f"The arm '{arm.name}' is missing {len(missing)} file(s), e.g. {missing[0]}. "
+                           f"Fetch it with: python -m echotwin.robot.arm --download {arm.name}")
+        kid = mujoco.MjSpec.from_file(str(arm.mjcf_path))
+    if arm.scale != 1.0:
+        resize(kid, arm.scale, jaws=set(arm.gripper["actuators"]))
+    return kid
+
+
+def resize(spec: "mujoco.MjSpec", k: float, jaws: set | frozenset = frozenset()) -> None:
+    """Make an arm k times bigger (or smaller) and keep it moving the same way.
+
+    Lengths times k, masses times k**3, inertias times k**5. A turning joint needs torques k**5 times bigger for the same
+    motion (inertia), a sliding one forces k**4 times bigger (mass times a k times longer travel): gains, damping, armature
+    and force limits follow, so the scaled arm has the same speed and stiffness relative to its size. The jaws (`jaws`: the
+    gripper's actuator names) are the exception: how hard they squeeze is about the object, not the arm, so the force at their
+    tip only grows with k (a big gripper squeezing a light round thing k**4 times harder pops it out)."""
+    def nan(v):
+        return v is None or np.isnan(np.asarray(v, float)).any()
+
+    for f in spec.frames:
+        f.pos = f.pos * k
+    for b in spec.bodies:
+        b.pos = b.pos * k
+        if b.explicitinertial:
+            b.mass, b.ipos = b.mass * k ** 3, b.ipos * k
+            b.inertia = b.inertia * k ** 5
+            if not nan(b.fullinertia):
+                b.fullinertia = b.fullinertia * k ** 5
+    for g in spec.geoms:
+        g.pos, g.size = g.pos * k, g.size * k
+        if not nan(g.fromto[0]):
+            g.fromto = g.fromto * k
+        if not nan(g.mass):
+            g.mass = g.mass * k ** 3
+    for s in spec.sites:
+        s.pos, s.size = s.pos * k, s.size * k
+    for m in spec.meshes:
+        m.scale = m.scale * k
+    slide = {}
+    for j in spec.joints:
+        sl = j.type == mujoco.mjtJoint.mjJNT_SLIDE
+        slide[j.name] = sl
+        if sl:
+            j.range = j.range * k
+        torque = k ** 4 if sl else k ** 5
+        j.damping, j.armature, j.frictionloss = j.damping * (k ** 3 if sl else torque), \
+            j.armature * (k ** 3 if sl else torque), j.frictionloss * torque
+    for a in spec.actuators:
+        sl = slide.get(a.target, False)
+        gain = k ** 3 if sl else k ** 5                      # N per m (or Nm per rad) for the same motion
+        a.gainprm[0] *= gain
+        a.biasprm[1] *= gain
+        if a.biasprm[2] < 0:                                 # an explicit damping; a positive value is a damping ratio
+            a.biasprm[2] *= gain
+        if a.name in jaws:                                   # the squeeze holds the object, whose weight does not change:
+            a.forcerange = a.forcerange * (k if sl else k ** 2)       # force at the jaw tip grows with k (a turning jaw: torque k**2)
+        else:
+            a.forcerange = a.forcerange * (k ** 4 if sl else k ** 5)
+        if sl:
+            a.ctrlrange = a.ctrlrange * k
 
 
 def compose(scene: "mujoco.MjSpec", arm: ArmSpec, base_xy=(0.0, 0.0)) -> None:
@@ -299,8 +368,9 @@ class Workspace:
     HEIGHTS = np.array([0.006, 0.02, 0.05, 0.09, 0.13, 0.17, 0.22])
     _cache: dict = {}
 
-    def __init__(self, ik: "ArmIK", pan_half_range: float):
+    def __init__(self, ik: "ArmIK", pan_half_range: float, scale: float = 1.0):
         self.pan = pan_half_range
+        self.RADII, self.HEIGHTS = self.RADII * scale, self.HEIGHTS * scale    # the grid is as big as the arm
         self.ok = np.zeros((len(self.RADII), len(self.HEIGHTS)), bool)
         q = ik.q_down
         for i, r in enumerate(self.RADII):
@@ -317,10 +387,10 @@ class Workspace:
 
     @classmethod
     def for_arm(cls, ik: "ArmIK", arm: ArmSpec) -> "Workspace":
-        key = (arm.name, str(arm.source), arm.mount_yaw_deg)
+        key = (arm.name, str(arm.source), arm.mount_yaw_deg, round(arm.scale, 4))
         if key not in cls._cache:
             lo, hi = ik.lo[0], ik.hi[0]
-            cls._cache[key] = cls(ik, float(min(abs(lo), abs(hi)) - 0.05))
+            cls._cache[key] = cls(ik, float(min(abs(lo), abs(hi)) - 0.05), arm.scale)
         return cls._cache[key]
 
     def z_max(self, r: float) -> float:
