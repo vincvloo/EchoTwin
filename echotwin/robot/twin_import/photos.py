@@ -41,6 +41,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     ai = ctx.ask_ai_json is not None
     summary = {"id": sid, "mode": "everyday", "frames": len(frames), "views": 1, "fallback": False,
                "naming": bool(n and ai),                    # the AI is still naming the objects: the pages say "naming..."
+               "surface": dict(lay.surface),                # a table until the AI says otherwise (or the user corrects it)
                "objects": {}, "unsure": [], "thumbs": [], "twin": f"/scans/{sid}/twin.jpg",
                "texture": f"/scans/{sid}/table.png", "seconds": 0, "pitch": res["pitch"], "calibration": res["calibration"],
                "props": [p["name"] for p in props],
@@ -60,6 +61,7 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
         summary["naming"] = False                            # the same dict the robot keeps: a page that connects later sees it too
         ctx.progress("done", {"summary": summary})
         return
+    surface = EV.surface_from_ai(named_json) if res["calibration"]["source"] != "marker" else None
     named = EV.apply_names({"items": [dict(i) for i in res["items"]]}, named_json)["items"]
     by_box = {tuple(i["box"]): i for i in named}
     res["items"] = [it for it in res["items"] if tuple(it["box"]) in by_box]  # drop what the AI called "skip"
@@ -70,6 +72,14 @@ async def import_everyday(frames: list[bytes], pitches: list, ctx: TwinContext) 
     cv2.imwrite(str(out / "twin.jpg"), ann, [cv2.IMWRITE_JPEG_QUALITY, 85])
     summary["props"] = [it["name"] for it in res["items"]]
     summary["naming"] = False
+    if surface and surface["kind"] != lay.surface["kind"]:   # not on a table: a new twin, sized for where the phone was
+        lay = EV.on_surface(Layout(texture=lay.texture, props=props, table_half=lay.table_half), surface)
+        summary["props"], summary["surface"] = [p["name"] for p in lay.props], dict(lay.surface)
+        summary["greeting"] = EV.greeting(named, surface["kind"])
+        summary["twin"] = f"/scans/{sid}/twin.jpg?named{int(time.time())}"
+        ctx.progress("done", {"summary": summary})
+        ctx.apply(lay, summary)
+        return
     summary["twin"] = f"/scans/{sid}/twin.jpg?named{int(time.time())}"
     ctx.progress("done", {"summary": summary})
     ctx.rename(props, EV.greeting(named))

@@ -7,6 +7,7 @@ y away from the viewer. Sim metres are real metres: an older "sim_scale" in a fi
 {
   "format": "phone-puppeteer-twin", "version": 1, "name": "DARE table",
   "table_cm": [80, 60],                                  # optional: the table (default 80 x 60, or what the objects need)
+  "surface": {"kind": "table", "height_cm": 75},          # optional: what the things stand on (table | floor | other)
   "table_texture": "table.png",                         # optional top-down photo of the table
   "objects": [                                           # everyday objects the robot can move
     {"name": "chocolate box", "shape": "flat",            # flat | box | cylinder | round
@@ -83,6 +84,7 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
     cm = lambda v: round(float(v) * 100, 2)
     doc = {"format": FORMAT, "version": 1, "name": layout.meta.get("name", name), "sim_scale": 1.0,
            "table_cm": [cm(2 * layout.table_half[0]), cm(2 * layout.table_half[1])],
+           "surface": {"kind": layout.surface.get("kind", "table"), "height_cm": cm(layout.surface.get("height", 0.75))},
            "table_texture": _copy(layout.texture, file_dir, "."), "objects": [], "obstacles": [], "scene": []}
     if doc["table_texture"]:
         doc["table_texture"] = doc["table_texture"].lstrip("./")
@@ -117,6 +119,18 @@ def layout_to_doc(layout: Layout, world, file_dir: Path, name: str = "twin") -> 
 
 
 # ---------------- document -> twin ----------------
+def _surface(s) -> dict:
+    """{"kind", "height_cm"} from a file -> {"kind", "height"} in metres; a missing or odd one is the usual table."""
+    from ..scene import DEFAULT_SURFACE, SURFACES
+    if not isinstance(s, dict) or s.get("kind") not in SURFACES:
+        return dict(DEFAULT_SURFACE)
+    try:
+        h = float(s.get("height_cm", 0.0 if s["kind"] == "floor" else 75.0)) / 100
+    except (TypeError, ValueError):
+        return dict(DEFAULT_SURFACE)
+    return {"kind": s["kind"], "height": 0.0 if s["kind"] == "floor" else max(0.0, min(h, 2.5))}
+
+
 def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
     if doc.get("format") not in (FORMAT, None):
         raise ImportError_(f"Not a twin file (format={doc.get('format')!r}).")
@@ -164,6 +178,7 @@ def doc_to_layout(doc: dict, file_dir: Path) -> Layout:
                           "pos": tuple(m(v) for v in e.get("pos_cm", (0, 0, 0))),
                           "euler": tuple(e.get("euler_deg", (0, 0, 0))), "scale": float(e.get("scale", 1.0))})
     lay.table_half = _table_half(doc, lay)
+    lay.surface = _surface(doc.get("surface"))
     if doc.get("camera"):
         c = doc["camera"]
         lay.view = {"pos": [m(v) for v in c["pos_cm"]], "xyaxes": c["xyaxes"], "fovy": c.get("fovy", 60)}

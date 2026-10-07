@@ -9,6 +9,9 @@ import numpy as np
 
 DEFAULT_TABLE_HALF = (0.40, 0.30)       # half size of the table (x, y) in metres, when nothing says otherwise
 TABLE_ASPECT = 1188 / 840               # width / height of the table texture the quick importer builds
+SURFACES = ("table", "floor", "other")
+DEFAULT_SURFACE = {"kind": "table", "height": 0.75}     # what the things stand on, and its height above the floor (m)
+ON_THE_FLOOR = 0.05                                     # a surface lower than this is the floor: no table is drawn
 SOLID_TABLE_MIN = DEFAULT_TABLE_HALF    # the table is never smaller than this: a photo shows a patch of it, not all of it
 
 
@@ -24,11 +27,12 @@ class Layout:
     # fixed furniture next to the table: {name, shape, pos, size (half xyz), rgb, yaw}; solid, never moved
     obstacles: list = field(default_factory=list)
     table_half: tuple = DEFAULT_TABLE_HALF   # real metres
+    surface: dict = field(default_factory=lambda: dict(DEFAULT_SURFACE))   # {"kind": table|floor|other, "height": m}
 
     def copy(self) -> "Layout":
         return Layout(self.texture, [dict(p) for p in self.props], self.view,
                       [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles],
-                      tuple(self.table_half))
+                      tuple(self.table_half), dict(self.surface))
 
     def scaled(self, k: float) -> "Layout":
         """The whole scene k times bigger (or smaller): table, objects, furniture, scanned meshes and the phone's camera.
@@ -100,11 +104,28 @@ def _edge_colour(texture: str | None) -> str:
     return "0.62 0.50 0.38 1"
 
 
+def surface_height(layout: Layout) -> float:
+    return float((layout.surface or DEFAULT_SURFACE).get("height", DEFAULT_SURFACE["height"]))
+
+
 def build_xml(layout: Layout) -> str:
     tw, th = layout.table_half                      # the patch that is mapped (texture, goals, where the arm stands)
     sw, sh = max(tw, SOLID_TABLE_MIN[0]), max(th, SOLID_TABLE_MIN[1])     # the table itself, at least a normal one
+    height = surface_height(layout)                 # the surface is at z = 0; the floor this far below it
+    far = max(1.0, tw / DEFAULT_TABLE_HALF[0], th / DEFAULT_TABLE_HALF[1])   # the overview camera steps back for a bigger area
+    on_floor = height < ON_THE_FLOOR
     around = (f'<geom name="tablesurround" type="plane" pos="0 0 0.0001" size="{_f(sw, sh, 0.01)}" '
-              f'rgba="{_edge_colour(layout.texture)}" contype="0" conaffinity="0"/>') if (sw, sh) != (tw, th) else ""
+              f'rgba="{_edge_colour(layout.texture)}" contype="0" conaffinity="0"/>') if (sw, sh) != (tw, th) and not on_floor else ""
+    if on_floor:                                    # the things stand on the floor: the floor is the surface, no table
+        floor_look = 'rgba="0 0 0 0"' if layout.scene else f'rgba="{_edge_colour(layout.texture)}"'
+        table = ""
+    else:
+        floor_look = 'rgba="0 0 0 0"' if layout.scene else 'material="floor"'
+        leg = (height - 0.05) / 2                   # legs from just under the top to the floor
+        table = (f'<geom name="table" type="box" pos="0 0 -0.02" size="{_f(sw + 0.02, sh + 0.02, 0.02)}" rgba="0.36 0.27 0.20 1"/>'
+                 + "".join(f'<geom type="box" pos="{_f(sx * (sw - 0.04), sy * (sh - 0.04), -(height + 0.03) / 2)}" '
+                           f'size="{_f(0.025, 0.025, leg)}" rgba="0.3 0.23 0.17 {0 if layout.scene else 1}"/>'
+                           for sx in (-1, 1) for sy in (-1, 1)))
     if layout.texture:
         tex = layout.texture.replace("\\", "/")
         table_asset = (f'<texture name="tabletex" type="2d" file="{tex}"/>'
@@ -179,15 +200,14 @@ def build_xml(layout: Layout) -> str:
   </asset>
   <worldbody>
     <light pos="0.3 -0.6 1.4" dir="-0.15 0.35 -1" diffuse="0.7 0.7 0.7" castshadow="true"/>
-    <geom name="floor" type="plane" pos="0 0 -0.75" size="4 4 0.1" {'rgba="0 0 0 0"' if layout.scene else 'material="floor"'}/>
-    <geom name="table" type="box" pos="0 0 -0.02" size="{_f(sw + 0.02, sh + 0.02, 0.02)}" rgba="0.36 0.27 0.20 1"/>
+    <geom name="floor" type="plane" pos="0 0 {-height:.4f}" size="4 4 0.1" {floor_look}/>
+    {table}
     {around}
     <geom name="tabletop" type="plane" pos="0 0 0.0002" size="{_f(tw, th, 0.01)}" material="tabletop" contype="0" conaffinity="0"/>
-    {"".join(f'<geom type="box" pos="{_f(sx * (sw - 0.04), sy * (sh - 0.04), -0.39)}" size="0.025 0.025 0.35" rgba="0.3 0.23 0.17 {0 if layout.scene else 1}"/>' for sx in (-1, 1) for sy in (-1, 1))}
     {"".join(scenery)}
     {"".join(fixed)}
     {"".join(props)}
-    <camera name="main" pos="0.55 -0.62 0.55" xyaxes="0.758 0.652 -0.000 -0.347 0.403 0.847"/>
+    <camera name="main" pos="{_f(0.55 * far, -0.62 * far, 0.55 * far)}" xyaxes="0.758 0.652 -0.000 -0.347 0.403 0.847"/>
     <camera name="top" pos="0 0 1.0" xyaxes="1 0 0 0 1 0"/>
     {f'<camera name="photo" pos="{_f(*layout.view["pos"])}" xyaxes="{_f(*layout.view["xyaxes"])}" fovy="{layout.view["fovy"]:.1f}"/>' if layout.view else ""}
   </worldbody>

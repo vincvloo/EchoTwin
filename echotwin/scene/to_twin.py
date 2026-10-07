@@ -102,8 +102,24 @@ def scene_to_twin(scene: dict, name: str | None = None) -> dict:
         (props if o["movable"] else obstacles).append(entry)
     return {"format": "phone-puppeteer-twin", "version": 1, "name": name or scene.get("name", "EchoTwin scene"),
             "sim_scale": 1.0, "table_cm": [round(real_w * 100, 1), round(real_h * 100, 1)],
+            "surface": surface_of(items, surface),
             "objects": props, "obstacles": obstacles, "scene": [],
             "window_m": [round(real_w, 3), round(real_h, 3)], "left_out": left_out}
+
+
+FLOOR_LEVEL = 0.1        # things whose bottom is lower than this (m) stand on the floor
+TABLES = ("table", "desk", "counter")
+
+
+def surface_of(items: list[dict], surface: dict | None) -> dict:
+    """What the things stand on, for the twin: the surface found under them, else the floor or an unknown height."""
+    if surface is not None:
+        label = f"{surface.get('class', '')} {surface.get('label', '')}".lower()
+        top = float(surface.get("height") or 0.75)
+        return {"kind": "table" if any(t in label for t in TABLES) else "other", "height_cm": round(top * 100, 1)}
+    bases = sorted(float(i.get("base_z") or 0.0) for i in items)
+    base = bases[len(bases) // 2] if bases else 0.0
+    return {"kind": "floor", "height_cm": 0.0} if base < FLOOR_LEVEL else {"kind": "other", "height_cm": round(base * 100, 1)}
 
 
 def _name(o: dict, scene: dict) -> str:

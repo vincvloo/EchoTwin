@@ -126,6 +126,24 @@ async def twin_scale(body: dict):
     return JSONResponse({"ok": True, "factor": round(k, 4), "scale": round(total, 4)})
 
 
+@router.post("/api/twin/surface")
+async def twin_surface(body: dict):
+    """What the things stand on: {"kind": "table" | "floor" | "other", "height_cm": 45} (height for other, or a table)."""
+    from .scene import SURFACES
+    kind = body.get("kind")
+    if kind not in SURFACES:
+        return JSONResponse({"ok": False, "error": "kind is table, floor or other."})
+    h = body.get("height_cm")
+    try:
+        h = None if h in (None, "") else float(h) / 100
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "The height is a number of centimetres."})
+    if kind != "floor" and h is not None and not 0.05 <= h <= 2.0:
+        return JSONResponse({"ok": False, "error": "A surface is between 5 and 200 cm high."})
+    sim.submit(sim.set_surface, kind, h)
+    return JSONResponse({"ok": True})
+
+
 @router.get("/api/arms")
 async def arms():
     return JSONResponse({"arms": A.describe_arms(), "current": sim.world.arm.name if hasattr(sim.world, "arm") else None,

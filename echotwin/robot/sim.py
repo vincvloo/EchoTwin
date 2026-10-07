@@ -17,6 +17,7 @@ from . import policy as POL
 from . import config
 from . import runlog
 from .dataset import Dataset, score_episode, state_vector
+from .features import everyday as EV
 from .features import measure as M
 from .features import move_things as MT
 from .features import prop_skills as PS
@@ -181,6 +182,34 @@ class Sim:
         size_txt = "" if abs(size - 1) < 1e-6 else f" at {size:.2f} times its size"
         self.say(f"Now I have the {a.name} arm{size_txt}: my jaws open {a.max_opening * 100:.0f} cm "
                  f"and I reach {ws.r_min * 100:.0f} to {ws.r_max * 100:.0f} cm from my base.")
+
+    def set_surface(self, kind: str, height: float | None = None):
+        """What the things stand on (the guess was wrong): table, floor or other (height in m). A one-photo twin without the
+        marker is resized too, because its sizes came from how high the phone was assumed to be above that surface."""
+        from .scene import SURFACES
+        if self.world.name != "sim":
+            return self.say("I can only change that in the simulation.")
+        if kind not in SURFACES:
+            return self.say("The things are on a table, on the floor, or on something else.")
+        h = 0.0 if kind == "floor" else float(0.75 if height is None and kind == "table" else (0.45 if height is None else height))
+        if kind != "floor" and not 0.05 <= h <= 2.0:
+            return self.say("A surface is between 5 cm and 2 m high.")
+        new = {"kind": kind, "height": h}
+        scan = self.scan or {}
+        estimated = scan.get("mode") == "everyday" and (scan.get("calibration") or {}).get("source") != "marker"
+        before = EV.phone_height(self.base_layout.surface)
+        lay = EV.on_surface(self.base_layout, new) if estimated else self.base_layout.copy()
+        lay.surface = dict(new)
+        self._abort()
+        self.base_layout = lay
+        self._rebuild(lay)
+        if scan:
+            scan["surface"] = dict(new)
+        where = {"table": "on a table", "floor": "on the floor"}.get(kind, f"on something {h * 100:.0f} cm high")
+        k = EV.phone_height(new) / before if estimated else 1.0
+        resized = "" if abs(k - 1) < 0.02 else (f" Seen from higher up, they are bigger than I thought: {k:.1f} times. I resized them."
+                                                if k > 1 else f" Seen from closer, they are smaller than I thought: {k:.1f} times. I resized them.")
+        self.say(f"Got it: the things are {where}.{resized}")
 
     def name_props(self, props: list[dict], line: str):
         """The AI named the everyday objects (and their shapes) after the twin was already shown."""
@@ -505,7 +534,7 @@ class Sim:
                        "h": pr["size"][2]} for i, pr in enumerate(w.layout.props)],
             "skill_labels": PS.KIND_LABEL,
             "demos": self.skills.counts(), "min_demos": PS.MIN_PROP_DEMOS,
-            "arm": w.arm.name if hasattr(w, "arm") else None, "arm_size": float(w.arm.scale) if hasattr(w, "arm") else 1.0, "scale": float(self.base_layout.meta.get("scale", 1.0)),
+            "surface": dict(w.layout.surface), "arm": w.arm.name if hasattr(w, "arm") else None, "arm_size": float(w.arm.scale) if hasattr(w, "arm") else 1.0, "scale": float(self.base_layout.meta.get("scale", 1.0)),
             "backend": {"name": w.name, "note": self.backend_note, "ready": w.arm_ready(), "policy": self.policy is not None},
             "attempt": ((self.replay or {}).get("loop") or {}).get("attempts", 0) + 1 if self.mode == "move" and (self.replay or {}).get("loop") else None,
             "robot_runs": self.robot_runs, "scanned": bool(self.scan), "name": config.ROBOT_NAME,
