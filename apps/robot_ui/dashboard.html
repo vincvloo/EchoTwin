@@ -98,7 +98,7 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
 #armSize{width:100%;accent-color:var(--accent)}
 #needList{list-style:none;padding:0;margin:8px 0 12px;display:flex;flex-direction:column;gap:4px;font-size:14px}
 #needList li.no{color:var(--dim)} #needList li.ok b{color:var(--accent)}
-#surfaceRow .chip.on{background:var(--accent);color:var(--on-accent)}
+#padMode .chip.on,#surfaceRow .chip.on{background:var(--accent);color:var(--on-accent)}
 #toasts{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);display:flex;flex-direction:column;gap:8px;z-index:20;width:min(92vw,460px)}
 .toast{padding:12px 16px;border-radius:var(--radius-sm);background:var(--text);color:var(--bg);font-weight:600;box-shadow:0 6px 24px #0005}
 .toast.bad{background:var(--stop);color:var(--on-stop)}
@@ -242,12 +242,13 @@ dialog .close{align-self:flex-end;margin-bottom:-8px}
     <div class="card">
       <h3>Drive the gripper by hand</h3>
       <div id="advSlot"><div id="pad" title="Hold a button to move the gripper">
+        <div class="chips" id="padMode" hidden style="flex-basis:100%"><button class="chip on" data-mode="arm" aria-pressed="true">Move the arm</button><button class="chip" data-mode="base" aria-pressed="false">Drive the base</button></div>
         <div class="padgrid">
-          <span></span><button data-v="0,1,0">▲<small>back</small></button><span></span>
+          <span></span><button data-v="0,1,0">▲<small id="padBack">back</small></button><span></span>
           <button data-v="-1,0,0">◀<small>left</small></button><button id="padGrip">Grip</button><button data-v="1,0,0">▶<small>right</small></button>
-          <span></span><button data-v="0,-1,0">▼<small>front</small></button><span></span>
+          <span></span><button data-v="0,-1,0">▼<small id="padFront">front</small></button><span></span>
         </div>
-        <div class="padcol"><button data-v="0,0,0.8">⤒ Up</button><button data-v="0,0,-0.8">⤓ Down</button></div>
+        <div class="padcol"><button data-v="0,0,0.8" id="padUp">⤒ Up</button><button data-v="0,0,-0.8" id="padDown">⤓ Down</button></div>
       </div></div>
       <p class="dim small" style="margin:10px 0 0">Keyboard (click the video first): <span id="keysHelp"><kbd>Z Q S D</kbd> or arrows move · <kbd>A</kbd>/<kbd>E</kbd> down/up · <kbd>Space</kbd> grip · <kbd>Esc</kbd> stop</span></p>
     </div>
@@ -471,6 +472,9 @@ function renderState() {
   showScale(s);
   showSurface(s.surface);
   showRobot(s.robot);
+  const wheels = !!(s.robot && s.robot.mobile);
+  $('#padMode').hidden = !wheels;
+  if (!wheels && moveMode === 'base') setMoveMode('arm');
   $('#stepTitle').textContent = st === 'ask' && s.name ? `Say what ${s.name} should move` : step.title;
   $('#stepNo').innerHTML = step.n ? `Step ${Math.min(step.n, 4)} of 4` : '&nbsp;';
   document.querySelectorAll('#stepDots i').forEach((d, i) => { d.className = step.n && i + 1 < step.n ? 'done' : step.n === i + 1 ? 'now' : ''; });
@@ -519,7 +523,8 @@ function renderWatch() {
 function renderTeach() {
   const t = state.task, why = lastDecision && lastDecision.kind === 'teach' ? Stage.reasonText(lastDecision.reason) : '';
   $('#teachTask').innerHTML = (why ? `<b>${esc(why)}.</b> ` : '') + (t && t.instruction ? `Show me: ${esc(t.instruction)}. ` : '') +
-    'Drive the gripper with the arrows below, or the keyboard, then let go of the object.';
+    'Drive the gripper with the arrows below, or the keyboard, then let go of the object.' +
+    (state.robot && state.robot.mobile ? ' Too far? Switch the pad to "Drive the base" and drive up to it first.' : '');
 }
 function renderReview() {
   const r = state.review;
@@ -689,16 +694,26 @@ $('#micBtn').onclick = () => {
   const r = new SR(); r.lang = 'en-US'; $('#micBtn').textContent = '…';
   r.onresult = e => sayText(e.results[0][0].transcript); r.onend = () => $('#micBtn').textContent = '🎤'; r.start();
 };
-// on-screen drive pad: hold a button to move
-let padV = null;
+// on-screen drive pad: hold a button to move. On a robot with wheels it can drive the base instead of the arm.
+let padV = null, moveMode = 'arm';
+// one motion (x right, y away, z up) -> the message for what is being moved: the arm, or the base (z turns it)
+const motion = (x, y, z) => moveMode === 'base' ? { t: 'drive', forward: y, sideways: x, turn: Math.sign(z) } : { t: 'ctl', vx: x, vy: y, vz: z };
+function setMoveMode(m) {
+  if (m === moveMode) return;
+  send(motion(0, 0, 0)); moveMode = m;
+  document.querySelectorAll('#padMode [data-mode]').forEach(b => { const on = b.dataset.mode === m; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+  $('#padBack').textContent = m === 'base' ? 'forward' : 'back'; $('#padFront').textContent = m === 'base' ? 'backward' : 'front';
+  $('#padUp').textContent = m === 'base' ? '⟲ Turn left' : '⤒ Up'; $('#padDown').textContent = m === 'base' ? '⟳ Turn right' : '⤓ Down';
+}
+document.querySelectorAll('#padMode [data-mode]').forEach(b => b.onclick = () => setMoveMode(b.dataset.mode));
 document.querySelectorAll('#pad [data-v]').forEach(b => {
   const on = e => { e.preventDefault(); padV = b.dataset.v.split(',').map(Number); b.classList.add('act'); };
-  const off = () => { if (padV) send({ t: 'ctl', vx: 0, vy: 0, vz: 0 }); padV = null; b.classList.remove('act'); };
+  const off = () => { if (padV) send(motion(0, 0, 0)); padV = null; b.classList.remove('act'); };
   b.addEventListener('mousedown', on); b.addEventListener('touchstart', on, { passive: false });
   b.addEventListener('mouseup', off); b.addEventListener('mouseleave', off); b.addEventListener('touchend', off);
 });
 $('#padGrip').onclick = () => send({ t: 'grip', on: !state?.grip });
-setInterval(() => { if (padV) send({ t: 'ctl', vx: padV[0], vy: padV[1], vz: padV[2] }); }, 50);
+setInterval(() => { if (padV) send(motion(padV[0], padV[1], padV[2])); }, 50);
 // keyboard driving: physical key positions (e.code), so it works on AZERTY and QWERTY alike
 const keys = new Set();
 const typing = () => /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName || '');
@@ -709,15 +724,14 @@ window.addEventListener('keydown', e => {
   if (e.code.startsWith('Arrow') || e.code.startsWith('Page')) e.preventDefault();
   keys.add(e.code);
 });
-window.addEventListener('keyup', e => keys.delete(e.code));
+window.addEventListener('keyup', e => { if (keys.delete(e.code) && !keys.size) send(motion(0, 0, 0)); });
 window.addEventListener('blur', () => keys.clear());
 setInterval(() => {
   if (!keys.size) return;
   const k = c => keys.has(c) ? 1 : 0;
-  send({ t: 'ctl',
-    vx: k('KeyD') - k('KeyA') + k('ArrowRight') - k('ArrowLeft'),
-    vy: k('KeyW') - k('KeyS') + k('ArrowUp') - k('ArrowDown'),
-    vz: 0.8 * (k('KeyE') - k('KeyQ') + k('PageUp') - k('PageDown')) });
+  send(motion(k('KeyD') - k('KeyA') + k('ArrowRight') - k('ArrowLeft'),
+              k('KeyW') - k('KeyS') + k('ArrowUp') - k('ArrowDown'),
+              0.8 * (k('KeyE') - k('KeyQ') + k('PageUp') - k('PageDown'))));
 }, 50);
 // show the letters of this keyboard's layout in the help line
 (async () => {

@@ -49,6 +49,9 @@ class Sim:
         self.cmds: queue.Queue = queue.Queue()
         self.human_v = np.zeros(3)
         self.human_t = 0.0
+        self.base_cmd = np.zeros(3)       # driving a mobile base by hand: forward, sideways, turn (-1..1)
+        self.base_t = 0.0
+        self.base_blocked_t = 0.0
         self.human_grip = False
         self.authority = "human"      # who drives: human | robot
         self.mode = "idle"            # idle | teach | review | move | replay | practice
@@ -259,6 +262,11 @@ class Sim:
         self.human_v = v if n <= 1 else v / n
         self.human_t = time.time()
 
+    def set_drive(self, forward, sideways, turn):
+        """The phone or the dashboard drives the mobile base by hand (each -1..1); stops by itself when they stop sending."""
+        self.base_cmd = np.clip(np.array([forward, sideways, turn], dtype=float), -1, 1)
+        self.base_t = time.time()
+
     def set_grip(self, on: bool):
         self.human_grip = bool(on)
 
@@ -293,6 +301,10 @@ class Sim:
             action = self._replay_step()
             recording = self.mode == "replay"
         elif self.authority == "human":
+            if w.mobile and time.time() - self.base_t < HUMAN_TIMEOUT and np.any(self.base_cmd):
+                if not w.drive_by(*self.base_cmd) and time.time() - self.base_blocked_t > 1.0:
+                    self.base_blocked_t = time.time()       # something is in the way: tell the hand on the phone, once a second
+                    self.haptic([60, 40, 60])
             fresh = time.time() - self.human_t < HUMAN_TIMEOUT
             action = np.array([*(self.human_v * VMAX if fresh else np.zeros(3)), 1.0 if self.human_grip else 0.0,
                                w.auto_yaw(w.hand_pos())])  # the wrist turns to the nearest object by itself

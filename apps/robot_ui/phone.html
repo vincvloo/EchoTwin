@@ -90,6 +90,7 @@ summary{cursor:pointer;color:var(--dim);font-weight:600;padding:8px 2px}
 
 <section id="drive">
   <button class="warn" id="motionBtn">Enable tilt &amp; shake</button>
+  <nav id="moveMode" hidden style="margin:0 0 10px"><button data-mode="arm" class="on">Move the arm</button><button data-mode="base">Drive the base</button></nav>
   <div id="pad" class="idle"><div class="hint" id="padHint">Drag like a joystick, or hold and tilt the phone.</div><div id="knob"></div></div>
   <div class="row">
     <button id="up">▲ Up</button>
@@ -149,7 +150,7 @@ $('#pipeSkip').onclick = () => send({ t: 'scan_skip' });
 
 // ---------- the step decides the tab ----------
 function showTab(name) {
-  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
+  document.querySelectorAll('nav:not(#moveMode) button').forEach(x => x.classList.toggle('on', x.dataset.tab === name));
   document.querySelectorAll('section').forEach(x => x.classList.toggle('on', x.id === name));
   const onScan = name === 'scan';
   $('#simWrap').hidden = onScan;
@@ -164,6 +165,9 @@ function renderState() {
   $('#stop').classList.toggle('halted', !!s.halted);
   $('#stop').textContent = s.halted ? 'STOPPED · tap to continue' : 'STOP';
   $('#reviewBar').classList.toggle('on', s.mode === 'review');
+  const wheels = !!(s.robot && s.robot.mobile);              // a robot on wheels: the joystick can drive the base too
+  $('#moveMode').hidden = !wheels;
+  if (!wheels && moveMode === 'base') setMoveMode('arm');
   $('#grip').textContent = s.grip ? 'Release' : 'Grip';
   gripOn = !!s.grip;
   $('#pipe').style.display = scanning ? 'block' : 'none';
@@ -175,7 +179,7 @@ function renderState() {
     if (TAB_FOR[st]) showTab(TAB_FOR[st]);
   }
 }
-document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+document.querySelectorAll('nav:not(#moveMode) button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
 $('#driveLink').onclick = () => { driveShown = true; $('nav [data-tab=drive]').hidden = false; showTab('drive'); };
 
 // ---------- drive ----------
@@ -193,14 +197,30 @@ function padPos(e) {
 let startPos = null;
 function padStart(e) { e.preventDefault(); driving = true; tilt0 = tilt ? { ...tilt } : null; startPos = padPos(e); padVec = null; pad.classList.remove('idle'); buzz(15); }
 function padMove(e) { if (!driving) return; e.preventDefault(); const p = padPos(e); if (Math.hypot(p.dx - startPos.dx, p.dy - startPos.dy) > 0.12) padVec = { dx: p.dx - startPos.dx, dy: p.dy - startPos.dy }; }
-function padEnd() { driving = false; padVec = null; pad.classList.add('idle'); knob.style.transform = ''; send({ t: 'ctl', vx: 0, vy: 0, vz }); }
+function padEnd() { driving = false; padVec = null; pad.classList.add('idle'); knob.style.transform = ''; stopMotion(); }
+// the joystick moves the arm, or (on a robot with wheels) drives the base: up is forward, the two buttons turn it
+let moveMode = 'arm';
+function stopMotion() {
+  if (moveMode === 'base') send({ t: 'drive', forward: 0, sideways: 0, turn: vz ? Math.sign(vz) : 0 });
+  else send({ t: 'ctl', vx: 0, vy: 0, vz });
+}
+function setMoveMode(m) {
+  if (m !== moveMode) { stopMotion(); }
+  moveMode = m;
+  document.querySelectorAll('#moveMode button').forEach(b => b.classList.toggle('on', b.dataset.mode === m));
+  $('#up').textContent = m === 'base' ? '⟲ Turn left' : '▲ Up';
+  $('#down').textContent = m === 'base' ? '⟳ Turn right' : '▼ Down';
+  $('#padHint').innerHTML = m === 'base' ? 'Drag to drive the base.<br>Up is forward.' : 'Drag like a joystick, or hold and tilt the phone.';
+  buzz(15);
+}
+document.querySelectorAll('#moveMode button').forEach(b => b.onclick = () => setMoveMode(b.dataset.mode));
 pad.addEventListener('touchstart', padStart, { passive: false }); pad.addEventListener('touchmove', padMove, { passive: false });
 pad.addEventListener('touchend', padEnd); pad.addEventListener('touchcancel', padEnd);
 pad.addEventListener('mousedown', padStart); window.addEventListener('mousemove', padMove); window.addEventListener('mouseup', () => driving && padEnd());
 
 function hold(el, v) {
   const on = e => { e.preventDefault(); vz = v; el.classList.add('act'); lastButton = Date.now(); };
-  const off = () => { vz = 0; el.classList.remove('act'); };
+  const off = () => { vz = 0; el.classList.remove('act'); if (moveMode === 'base' && !driving) stopMotion(); };
   el.addEventListener('touchstart', on, { passive: false }); el.addEventListener('touchend', off); el.addEventListener('touchcancel', off);
   el.addEventListener('mousedown', on); el.addEventListener('mouseup', off); el.addEventListener('mouseleave', off);
 }
@@ -216,7 +236,9 @@ setInterval(() => {
     else if (tilt && tilt0) { vx = clamp(dead(tilt.g - tilt0.g, 4) / 22); vy = clamp(-dead(tilt.b - tilt0.b, 4) / 22); }
     knob.style.transform = `translate(${vx * 80}px, ${-vy * 80}px)`;
   }
-  if (driving || vz) send({ t: 'ctl', vx, vy, vz });
+  if (!(driving || vz)) return;
+  if (moveMode === 'base') send({ t: 'drive', forward: vy, sideways: vx, turn: Math.sign(vz) });
+  else send({ t: 'ctl', vx, vy, vz });
 }, 50);
 
 // motion permission (iOS)
