@@ -159,17 +159,14 @@ class Sim:
         self.scan = summary
         self.say(summary["greeting"])
 
-    SCALE_RANGE = (0.2, 5.0)
-
     def set_scale(self, k: float, line: str | None = None):
         """The twin k times bigger or smaller (the arm stays): when the sizes the photo gave are wrong, or to make Pip
         look bigger (k below 1) or smaller (k above 1) next to the table."""
         if self.world.name != "sim":
             return self.say("I can only rescale the simulation, not the real arm's twin.")
-        lo, hi = self.SCALE_RANGE
-        now = float(self.base_layout.meta.get("scale", 1.0))
-        if not lo <= now * k <= hi:
-            return self.say(f"That would make the table {now * k:.2f} times its real size. I stay between {lo} and {hi}.")
+        why = self.base_layout.scale_problem(k)        # the result must be plausible, whatever the factor
+        if why:
+            return self.say(why)
         self._abort()
         self.base_layout = self.base_layout.scaled(k)
         self._rebuild(self.base_layout)
