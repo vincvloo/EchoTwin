@@ -258,7 +258,8 @@ BASE_JOINTS = ("robot_x", "robot_y", "robot_yaw")       # a mobile base: drives 
 
 def add_mobile_base(scene: "mujoco.MjSpec", robot) -> "mujoco.MjsBody":
     """A base that drives in any direction (two slides and a turn, held by position servos), seen from above as its
-    footprint. It does not touch the surface or the objects (contype 2): the planner keeps it clear of them."""
+    footprint. It bumps into the objects and the furniture (collision bit 4, see scene.BUMPS) but not into the surface
+    it drives on or the arm on top of it. The planner keeps it clear of things; driving into one anyway pushes it."""
     fx, fy = (v / 2 for v in robot.footprint)
     h = max(robot.mount_height, 0.02)
     b = scene.worldbody.add_body(name="robot_base", pos=[0, 0, 0])
@@ -266,12 +267,12 @@ def add_mobile_base(scene: "mujoco.MjSpec", robot) -> "mujoco.MjsBody":
                                 ([1, 0, 0], [0, 1, 0], [0, 0, 1])):
         b.add_joint(name=name, type=kind, axis=axis, damping=5.0 if kind == mujoco.mjtJoint.mjJNT_SLIDE else 0.5)
     b.add_geom(name="robot_body", type=mujoco.mjtGeom.mjGEOM_BOX, size=[fx, fy, h / 2], pos=[0, 0, h / 2],
-               rgba=[0.22, 0.24, 0.28, 1], contype=2, conaffinity=2, density=600)
+               rgba=[0.22, 0.24, 0.28, 1], contype=4, conaffinity=4, density=600)
     for k, ang in enumerate((90, 210, 330)):             # three wheels, for the look
         a = np.radians(ang)
         b.add_geom(name=f"robot_wheel_{k}", type=mujoco.mjtGeom.mjGEOM_CYLINDER, size=[0.035, 0.012, 0],
                    pos=[0.8 * fx * np.cos(a), 0.8 * fy * np.sin(a), 0.035], euler=[90, 0, ang + 90],
-                   rgba=[0.1, 0.1, 0.1, 1], contype=2, conaffinity=2, density=300)
+                   rgba=[0.1, 0.1, 0.1, 1], contype=4, conaffinity=4, density=300)
     for name, kp in zip(BASE_JOINTS, (4000.0, 4000.0, 120.0)):
         act = scene.add_actuator(name=name, target=name, trntype=mujoco.mjtTrn.mjTRN_JOINT)
         act.set_to_position(kp=kp, dampratio=1.0)

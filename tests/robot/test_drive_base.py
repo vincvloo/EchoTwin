@@ -121,3 +121,30 @@ def test_the_drive_message_reaches_the_robot(monkeypatch):
     monkeypatch.setattr(ws.sim, "set_drive", lambda *a: got.append(a))
     asyncio.run(ws.on_message({"t": "drive", "forward": 0.5, "sideways": -1, "turn": 0}, "phone"))
     assert got == [(0.5, -1, 0)]
+
+
+def _push(w, ticks, dy):
+    """Command the base straight ahead, ignoring the 'stop before a thing' check (as a stuck planner would)."""
+    for _ in range(ticks):
+        w.hand.base = w.hand.base + np.array([0.0, dy, 0.0])
+        w.step((0, 0, 0, 0))
+
+
+def test_on_open_floor_the_base_glides_and_follows_its_commands(w):
+    w.settle(10)
+    _push(w, 30, 0.01)
+    w.settle(10)
+    real = w.data.qpos[w.ik.base_qadr[:2]]
+    assert real == pytest.approx(w.hand.base[:2], abs=0.003)                 # nothing drags it: it does not touch the floor
+
+
+def test_driven_into_a_thing_the_base_pushes_it_instead_of_passing_through():
+    w = World(_floor(_cube(0.0, -0.55)), None, "mobile_arm")
+    w.settle(10)
+    start = w.obj_pos("prop_0").copy()
+    _push(w, 40, 0.01)                                                        # 40 cm straight through where the cube is
+    w.settle(20)
+    moved = w.obj_pos("prop_0") - start
+    assert moved[1] > 0.1                                                     # shoved ahead of the base
+    gap = abs(w.obj_pos("prop_0")[1] - w.data.qpos[w.ik.base_qadr[1]])
+    assert gap > 0.13 - 0.01                                                  # and outside its footprint, not inside it
