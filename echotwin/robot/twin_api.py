@@ -118,10 +118,10 @@ async def twin_scale(body: dict):
             k = float(body["factor"])
     except (KeyError, ValueError, TypeError, IndexError, ZeroDivisionError):
         return JSONResponse({"ok": False, "error": "Give an object and its real width in cm, or a factor."})
-    lo, hi = sim.SCALE_RANGE
     total = float(sim.base_layout.meta.get("scale", 1.0)) * k
-    if not k > 0 or not lo <= total <= hi:
-        return JSONResponse({"ok": False, "error": f"That would make the table {total:.2f} times its real size; the limit is {lo} to {hi}."})
+    why = sim.base_layout.scale_problem(k)
+    if why:
+        return JSONResponse({"ok": False, "error": why})
     sim.submit(sim.set_scale, k)
     return JSONResponse({"ok": True, "factor": round(k, 4), "scale": round(total, 4)})
 

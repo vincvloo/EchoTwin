@@ -84,7 +84,8 @@ So the size a card shows is a geometric answer for any arm; that the resized arm
 the built-in arm only. Below 0.75 the built-in arm can hardly reach the table, so the slider stops there.
 
 Sizes of the objects: from one photo they are estimates. If you know how wide one object really is, "Rescale the table"
-scales the table, its objects and the camera by one factor (0.2 to 5 of what the photo said); the arm does not change.
+scales the table, its objects and the camera by one factor; the arm does not change. Any factor is fine as long as the
+result is plausible: every thing between 5 mm and 2 m, the mapped area at most 20 m wide.
 
 ## The SO-ARM100: what is fixed, what is not (measured)
 

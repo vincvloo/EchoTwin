@@ -34,6 +34,24 @@ class Layout:
                       [dict(m) for m in self.scene], dict(self.meta), [dict(o) for o in self.obstacles],
                       tuple(self.table_half), dict(self.surface))
 
+    THING_SIZE = (0.005, 2.0)     # metres: the largest side of a thing to move, from a button to a chair
+    AREA_MAX = 20.0               # metres: the widest mapped area
+
+    def scale_problem(self, k: float) -> str | None:
+        """Why rescaling by k would give sizes that cannot be real, in plain words; None when they are plausible."""
+        if not k > 0:
+            return "The factor must be more than zero."
+        lo, hi = self.THING_SIZE
+        for p in self.props:
+            side = 2 * max(p["size"]) * k
+            if side < lo:
+                return f"That would make the {p['name']} {side * 1000:.1f} mm big: too small to be real."
+            if side > hi:
+                return f"That would make the {p['name']} {side:.1f} m big: too big to be a thing to move."
+        if 2 * max(self.table_half) * k > self.AREA_MAX:
+            return f"That would make the mapped area {2 * max(self.table_half) * k:.0f} m wide."
+        return None
+
     def scaled(self, k: float) -> "Layout":
         """The whole scene k times bigger (or smaller): table, objects, furniture, scanned meshes and the phone's camera.
         The arm is not touched, so this is also "the arm k times smaller". `meta["scale"]` keeps the product so far."""
@@ -77,6 +95,7 @@ def _f(*v) -> str:
     return " ".join(f"{x:.4f}" for x in v)
 
 
+BUMPS = 'contype="5" conaffinity="5"'   # bit 1: everything as before; bit 4: a mobile base bumps into it (arm.add_mobile_base)
 ATLAS_SUFFIX = "_cube.png"    # a skin with this name holds the six faces (3 rows x 4 columns), see features/everyday.cube_atlas
 
 
@@ -161,14 +180,14 @@ def build_xml(layout: Layout) -> str:
             look = f'rgba="{_f(r, g, b)} {alpha}"'
         props.append(f'<body name="prop_{i}" pos="{_f(pr["pos"][0], pr["pos"][1], hz + 0.0005)}" euler="0 0 {pr.get("yaw", 0):.1f}">'
                      f'<freejoint name="prop_{i}"/>'
-                     f'<geom {geom} {look} mass="{prop_mass(pr):.4f}" friction="1.5 0.05 0.01" condim="6"/></body>')
+                     f'<geom {geom} {look} mass="{prop_mass(pr):.4f}" friction="1.5 0.05 0.01" condim="6" {BUMPS}/></body>')
 
     fixed = []
     for i, ob in enumerate(layout.obstacles):
         hx, hy, hz = ob["size"]
         r, g, b = ob["rgb"]
         shape = f'type="cylinder" size="{_f((hx + hy) / 2, hz)}"' if ob.get("shape") == "cylinder"             else f'type="box" size="{_f(hx, hy, hz)}"'
-        fixed.append(f'<geom name="obstacle_{i}" {shape} pos="{_f(ob["pos"][0], ob["pos"][1], hz)}" '
+        fixed.append(f'<geom name="obstacle_{i}" {shape} {BUMPS} pos="{_f(ob["pos"][0], ob["pos"][1], hz)}" '
                      f'euler="0 0 {ob.get("yaw", 0):.1f}" rgba="{_f(r, g, b)} 0.4"/>')
 
     scenery = []

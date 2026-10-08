@@ -79,7 +79,9 @@ def test_a_scale_outside_the_limits_is_refused_and_nothing_changes(sim):
     size = sim.world.layout.props[0]["size"]
     sim.set_scale(0.01)
     sim.set_scale(100)
-    assert sim.world.layout.props[0]["size"] == size and "stay between" in said[-1]
+    assert sim.world.layout.props[0]["size"] == size and "too big to be a thing" in said[-1]
+    sim.set_scale(0.01)
+    assert sim.world.layout.props[0]["size"] == size and "too small to be real" in said[-1]
 
 
 def test_the_endpoint_turns_a_real_width_into_a_factor(sim, monkeypatch):
@@ -125,3 +127,29 @@ def test_the_robot_changes_its_arm_and_keeps_the_table(sim):
     assert ready[0] in said[-1] or sim.world.arm.name in said[-1]
     sim.set_arm("builtin")
     assert sim.world.arm.name == "builtin"
+
+
+def test_any_factor_is_fine_when_the_result_is_plausible():
+    lay = Layout()
+    lay.props = [{"name": "case", "shape": "round", "pos": (0.0, 0.0), "yaw": 0.0, "size": (0.25, 0.25, 0.1), "rgb": (0.1, 0.1, 0.1)}]
+    assert lay.scale_problem(0.12) is None                                     # a floor estimate of 50 cm, really 6 cm
+    assert "too small" in lay.scale_problem(0.001) and "too big" in lay.scale_problem(5.0)
+    assert lay.scale_problem(0) == "The factor must be more than zero."
+    lay.props[0]["size"] = (0.01, 0.01, 0.01)
+    lay.table_half = (5.0, 4.0)
+    assert "mapped area" in lay.scale_problem(3.0)
+
+
+def test_a_floor_estimate_can_be_brought_to_the_real_size(sim, monkeypatch):
+    big = Layout(table_half=(1.3, 0.9))
+    big.props = [{"name": "case", "shape": "box", "pos": (0.0, 0.1), "yaw": 0.0, "size": (0.25, 0.25, 0.1), "rgb": (0.1, 0.1, 0.1)}]
+    sim._rebuild(big)
+    sim.base_layout = sim.world.layout.copy()
+    monkeypatch.setattr(hub.sim, "world", sim.world)
+    monkeypatch.setattr(hub.sim, "base_layout", sim.base_layout)
+    calls = []
+    monkeypatch.setattr(hub.sim, "submit", lambda fn, *a: calls.append(a))
+    r = TestClient(server.app).post("/api/twin/scale", json={"object": 0, "width_cm": 6}).json()
+    assert r["ok"] and r["factor"] == 0.12 and calls == [(0.12,)]
+    sim.set_scale(0.12)
+    assert 2 * sim.world.layout.props[0]["size"][0] == pytest.approx(0.06)

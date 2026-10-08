@@ -31,7 +31,8 @@ asked for.
   outside the base's own footprint, clear of the other things and the furniture), then the arm works as on a fixed base. So
   every skill, the practice, the imagining and the learning work the same on both kinds.
 - The base is three joints (along x, along y, turning) held by position servos; it drives at its speed and turns at its rate.
-  It does not collide with the objects or the surface: the planner keeps it clear of them.
+  It glides over the surface and bumps into the objects and the furniture (collision bit 4, `scene.BUMPS`): the planner keeps
+  it clear of them, and driven into one anyway it pushes it, as a real base would.
 - It starts just in front of the mapped area. "Out of my reach" never happens on wheels; it says "there is no free spot for me
   to stand next to it" instead, when things or furniture leave no room.
 - In the arm size card, a mobile robot needs only the jaw width: it drives up to the thing.
