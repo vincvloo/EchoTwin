@@ -103,6 +103,7 @@ class ArmSpec:
     real: dict | None = None        # servo ids and calibration for a real arm (see feetech.py)
     source: Path | None = None
     scale: float = 1.0              # the arm k times its described size (see sized and resize)
+    pad_contact: dict | None = None  # how the pads touch: {"friction": [slide, spin, roll], "condim": 4, ...} (see pad_tune)
 
     @property
     def mjcf_path(self) -> Path | None:
@@ -181,7 +182,7 @@ def parse(d: dict, source: Path | None = None) -> ArmSpec:
                    actuators=list(d["actuators"]), gripper=dict(g), tool=dict(d["tool"]), pads=list(d["pads"]),
                    home=[float(v) for v in d["home"]], prefix=d.get("prefix", PREFIX),
                    mount_yaw_deg=float(d.get("mount_yaw_deg", 0.0)), max_opening=d.get("max_opening"),
-                   download=d.get("download"), real=d.get("real"), source=source)
+                   download=d.get("download"), real=d.get("real"), source=source, pad_contact=d.get("pad_contact"))
 
 
 # ---------------- putting the arm into a scene ----------------
@@ -194,9 +195,32 @@ def child_spec(arm: ArmSpec) -> "mujoco.MjSpec":
             raise ArmError(f"The arm '{arm.name}' is missing {len(missing)} file(s), e.g. {missing[0]}. "
                            f"Fetch it with: python -m echotwin.robot.arm --download {arm.name}")
         kid = mujoco.MjSpec.from_file(str(arm.mjcf_path))
+    if arm.pad_contact:
+        pad_tune(kid, arm.pads, arm.pad_contact)
     if arm.scale != 1.0:
         resize(kid, arm.scale, jaws=set(arm.gripper["actuators"]))
     return kid
+
+
+PAD_KEYS = ("friction", "condim", "solref", "solimp", "margin")
+
+
+def pad_tune(spec: "mujoco.MjSpec", pads: list[str], contact: dict) -> int:
+    """Set how the gripper's pads touch things (the geoms whose names contain one of `pads`), from the arm descriptor's
+    "pad_contact": friction (slide, spin, roll), condim (4 adds spin friction, so a pinched thing does not swivel),
+    solref, solimp, margin. The arm's own file stays as it is. Returns how many pads were changed."""
+    unknown = set(contact) - set(PAD_KEYS)
+    if unknown:
+        raise ArmError(f"pad_contact: unknown key(s) {sorted(unknown)}; use {', '.join(PAD_KEYS)}.")
+    n = 0
+    for g in spec.geoms:
+        if g.name and any(p in g.name for p in pads):
+            for key, val in contact.items():
+                setattr(g, key, val if key in ("condim", "margin") else np.asarray(val, float))
+            n += 1
+    if not n:
+        raise ArmError(f"pad_contact: no geom name contains {pads}.")
+    return n
 
 
 def resize(spec: "mujoco.MjSpec", k: float, jaws: set | frozenset = frozenset()) -> None:
