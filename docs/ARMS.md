@@ -176,3 +176,25 @@ the single jaw goes (`World._jaw_side`):
 With 12 trials (seed 11), flat 67 / 75 / 25 % -> 75 / 100 / 50 %, box 50 / 67 / 50 % -> 67 / 100 / 75 %, round
 75 / 83 / 83 % -> 75 / 83 / 75 % (one trial). 56 % is about 75 % of what its jaws can hold. The built-in arm (two pads)
 is not affected: the same results in every cell, the same scripted session.
+
+Then the balls (PR "ball judging"). Most balls that "tipped over" had not: they lay on the spot, within half a centimetre,
+rolled 30 to 50 degrees. For a ball that is not a failure, but the judge measured how far its up axis leant, as for a box.
+`World.has_up` says which things have no up (a round thing whose three sizes are within 15 % of each other: a ball, not an
+egg or a lentil), and the judge (`prop_skills.tilt_deg`) does not count their lean. Only the ball cells change:
+
+| SO-ARM100, 12 trials | next to | to the left | on top of |
+|---|---|---|---|
+| round, seed 11 | 83 -> 92 % | 67 -> 92 % | 75 -> 75 % |
+| round, seed 13 | 75 -> 92 % | 75 -> 83 % | 75 -> 83 % |
+
+Flat things and boxes give the same results in every cell, the built-in arm stays at 93 % and the scripted session is the same.
+
+What the balls still do wrong, and what did not help:
+
+- Far from its base the SO-ARM100 leans its tool out to hover at the carry height, which puts the gripper over the ball it
+  is coming for; it presses the ball into the table and rolls it away. The reach grid's rows are 4 cm apart and it
+  underestimates the ceiling by 2 to 3.5 cm in the middle of the reach, so the arm leans where it would not need to. Finding
+  the ceiling between the rows, and trying straight down first, fixed that ball, but cost flat things and boxes 12 of 144
+  trials (other spots became reachable and other paths were taken). Hovering lower, straight down, and waiting for the lean
+  to settle before going down made no measurable difference. None of it is in this PR.
+- A ball set on a box sometimes rolls off it.
