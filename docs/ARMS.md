@@ -124,3 +124,29 @@ Skill table (`skillcheck`, 6 trials per cell, same seed):
 Its cylinder (7 cm) is wider than its jaws: declined, not failed, so 31 % is about 42 % of what it can hold at all. The
 built-in arm stays at 94 % (same demos, messages and positions as before). What still fails most: stacking (it tips over
 or slides off) and round things carried to the side. Higher pad friction (`pad_contact`) did not help.
+
+Then stacking (PR "stacking"). The carry height was one number for the whole table, but the arm's ceiling drops far from its
+base: over the spot to stack on, the tool was held lower than planned and the carried thing hit the side or the top edge of
+the other one. Now:
+
+- **The carry height is the lowest ceiling on the way** (`World.path_ceiling`: over the pick, over the place, and between;
+  for a mobile base, from where it stands at each end).
+- **The palm** (`World.palm`): how far the tool can go down over a thing's top before the hand sits on it, measured with rays
+  up from the thing, jaws open (5.4 cm built-in, 5.7 cm SO-ARM100). A thing taller than that sticks up into the hand and
+  hangs lower. Under a low ceiling, the thing is held lower down so its bottom clears the other top by 1.5 cm.
+- **It says so when it cannot**: "I can't lift it high enough over the box from here" (`refusal(name, goal, on=...)`), instead
+  of trying and knocking the other thing over. skillcheck draws another layout in that case, as for other refusals, so the
+  random layouts after it change too.
+
+| SO-ARM100 | next to | to the left | on top of |
+|---|---|---|---|
+| flat | 33 -> 33 % | 33 -> 33 % | 17 -> 50 % |
+| box | 83 -> 83 % | 50 -> 83 % | 17 -> 67 % |
+| round | 83 -> 83 % | 50 -> 50 % | 0 -> 50 % |
+| all | | | 31 -> 44 % |
+
+The "to the left" box change comes from the different random layouts, not from this change. The built-in arm: 94 % -> 93 %
+on the whole table (one cylinder stack in different layouts), 88 -> 93 % and 89 -> 92 % for cylinder and ball (12 trials,
+seeds 8 and 9); on the same layouts its cylinder stacks fail less (6 of 16 before, 3 of 16 after, one layout now declined).
+A scripted session gives the same messages and positions as before. What still fails: flat things slip out of the single jaw
+when lifted, and balls tip over when set down.

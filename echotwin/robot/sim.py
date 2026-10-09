@@ -388,7 +388,7 @@ class Sim:
         if not w.arm_ready():
             return self.say("The real arm is waiting. Say or press 'arm the robot' to let it move, then ask again.")
         # 1b. can my arm do it at all?
-        why_not = w.refusal(me, goal)
+        why_not = w.refusal(me, goal, on=task["ref"] if task.get("stack") else None)
         if why_not:
             self.emit({"t": "decision", "kind": "refuse", "task": task, "why": why_not})
             return self.say(f"I can't move the {name}: {why_not}.")

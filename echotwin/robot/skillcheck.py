@@ -83,7 +83,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
         if w.can_grasp("prop_0")[0] is False:
             return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0}
         goal = MT.goal_xy(w, plan)
-        if not w.refusal("prop_0", goal):
+        if not w.refusal("prop_0", goal, on="prop_1" if task_name == "on top of" else None):
             break
     if backend == "mock":                       # the same move, on an arm that is not the simulation
         from .drivers import MockDriver
