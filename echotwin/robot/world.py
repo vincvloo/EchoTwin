@@ -24,6 +24,7 @@ REST_RISE = 0.14            # resting tool height
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
+STACK_CLEAR = 0.015         # m: a carried object's bottom passes this far above the top it is to be set on
 MIN_THICKNESS = 0.015       # thinner than this cannot be pinched from a table (measured, docs/RESULTS.md)
 
 
@@ -92,6 +93,7 @@ class World:
         mujoco.mj_forward(m, self.data)
         self.ik.seed_down((0.0, 0.22))
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
+        self._palms = {}
         self.go_rest(teleport=True)
 
     # ---------- where the base stands ----------
@@ -230,6 +232,76 @@ class World:
         """Reachable if the base stood at `pose` (x, y, turn)."""
         return self.workspace.reachable(self._rel(xy, np.asarray(pose, float)), z)
 
+    def ceiling(self, xy, pose=None) -> float:
+        """The highest the tool can go above this table point (from a base at `pose`, default where it stands),
+        a little below the arm's limit, like carry_height()."""
+        pose = self.hand.base if pose is None else np.asarray(pose, float)
+        return self.workspace.z_max(float(np.hypot(*self._rel(xy, pose)))) - 0.01
+
+    def stands(self, pick, place, ignore: str | None = None) -> tuple:
+        """Where the base stands to pick up at `pick` and to set down at `place`: ((pose, drove there), (pose, drove there)),
+        the drive spot None when it does not move. A fixed base always stands where it is."""
+        pose = self.hand.base.copy()
+        at_pick = at_place = None
+        if self.mobile and not self.reachable_from(pose, pick):
+            at_pick = self.standoff(pick, ignore=ignore)
+            pose = pose if at_pick is None else at_pick
+        first = pose
+        if self.mobile and not self.reachable_from(pose, place):
+            at_place = self.standoff(place, ignore=ignore, near=pose[:2])
+            pose = pose if at_place is None else at_place
+        return (first, at_pick), (pose, at_place)
+
+    def path_ceiling(self, pick, place, ignore: str | None = None) -> float:
+        """The lowest ceiling the tool meets while it carries something from `pick` to `place` (see ceiling())."""
+        (p0, _), (p1, at_place) = self.stands(pick, place, ignore)
+        pick, place = np.asarray(pick, float)[:2], np.asarray(place, float)[:2]
+        if at_place is not None:                       # it drives on the way: lifts over the pick, lowers over the place
+            return min(self.ceiling(pick, p0), self.ceiling(place, p1))
+        return min(self.ceiling(pick + (place - pick) * f, p0) for f in np.linspace(0.0, 1.0, 5))
+
+    def palm(self, name: str) -> float:
+        """How far the tool point can go down over this object's top before a part of the arm above the jaws
+        (the palm, the wrist) sits on it: rays up from the object's top, the tool pointing straight down."""
+        key = (round(self.grasp_width(name), 4), round(self.radius(name), 4))
+        if key in self._palms:
+            return self._palms[key]
+        m, s = self.model, self.ik.scratch
+        q, _, _ = self.ik.solve(self.ik.base + np.array([0.0, 0.5 * (self.workspace.r_min + self.workspace.r_max), 0.15]),
+                                0.0, self.ik.q_down)
+        jaws = [int(m.jnt_qposadr[m.actuator_trnid[a][0]]) for a in self.gact]
+        was = s.qpos[jaws].copy()
+        s.qpos[jaws] = self.arm.gripper["open"]                # the jaws open, as they come down over the object
+        self.ik.pose(q)                                  # the scratch copy now holds the arm pointing down, jaws along x
+        tool = s.site_xpos[self.site].copy()
+        centre = tool
+        if self.arm.gripper["mode"] == "single":           # the object stands beside the fixed jaw (grasp_offset); here the jaws close along x
+            centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP), 0, 0])
+        r = 0.6 * min(self.radius(name), 0.5 * self.grasp_width(name) + 0.01)
+        robot = {b for b in range(m.nbody) if m.body(b).name.startswith(self.arm.prefix)}
+        geomid = np.zeros(1, np.int32)
+        best = 1.0
+        for dx, dy in ((0, 0), (r, 0), (-r, 0), (0, r), (0, -r)):
+            start = centre + np.array([dx, dy, 0.0])
+            for _ in range(8):                           # skip what is not the robot (objects above, the scene)
+                dist = mujoco.mj_ray(m, s, start, np.array([0.0, 0.0, 1.0]), None, 1, -1, geomid)
+                if dist < 0:
+                    break
+                g = int(geomid[0])
+                solid = m.geom_contype[g] or m.geom_conaffinity[g]   # visual-only meshes do not stop anything
+                if solid and int(m.geom_bodyid[g]) in robot and g not in self.pads:
+                    best = min(best, float(start[2] + dist - tool[2]))
+                    break
+                start = start + np.array([0.0, 0.0, dist + 1e-4])
+        s.qpos[jaws] = was
+        self._palms[key] = best
+        return best
+
+    def stack_hang(self, name: str, held: float = 0.0) -> float:
+        """How far below the tool the bottom of `name` hangs, held `held` above its bottom (default: as low as the jaws go).
+        A thing taller than the palm sticks up into the hand and is held higher than asked."""
+        return max(2 * self.half(name) - self.palm(name), 0.004, held)
+
     def workspace_sample(self, rng) -> tuple[float, float]:
         """A random reachable spot on the table, in table coordinates."""
         rx, ry = self.workspace.sample(rng)
@@ -323,8 +395,8 @@ class World:
                 "grasp": round(grasp, 2), "reach": round(reach, 2), "most": round(most, 2),
                 "needed": None if why else round(k, 2), "why": why}
 
-    def refusal(self, name: str, goal_xy=None) -> str:
-        """Why the arm cannot move this object (to this spot), in plain words; empty when it can."""
+    def refusal(self, name: str, goal_xy=None, on: str | None = None) -> str:
+        """Why the arm cannot move this object (to this spot, or on top of the object `on`), in plain words; empty when it can."""
         ok, why = self.can_grasp(name)
         if not ok:
             return why
@@ -333,11 +405,17 @@ class World:
                 return "there is no free spot for me to stand next to it"
             if goal_xy is not None and self.standoff(goal_xy, ignore=name) is None:
                 return "there is no free spot for me to stand next to that place"
-            return ""
-        if not self.reachable(self.obj_pos(name)[:2]):
-            return "it is out of my reach"
-        if goal_xy is not None and not self.reachable(goal_xy):
-            return "the spot is out of my reach"
+        else:
+            if not self.reachable(self.obj_pos(name)[:2]):
+                return "it is out of my reach"
+            if goal_xy is not None and not self.reachable(goal_xy):
+                return "the spot is out of my reach"
+        if on is not None and goal_xy is not None:
+            off = self.grasp_offset(name)[:2]
+            top = float(self.obj_pos(on)[2] + self.half(on))
+            ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name)
+            if ceiling - self.stack_hang(name) - top < STACK_CLEAR:
+                return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here"
         return ""
 
     def grasp_offset(self, name: str) -> np.ndarray:

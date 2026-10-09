@@ -14,7 +14,7 @@ import os
 
 import numpy as np
 
-from ..world import CTRL_DT, VMAX, World
+from ..world import CTRL_DT, STACK_CLEAR, VMAX, World
 from . import measure as M
 from . import move_things as MT
 
@@ -111,12 +111,17 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
     # pad tips low on the object; thin things need the tips right at the table
     grasp_z = float(max(o[2] - h + 0.004 + (skill["grip"] + 1.0) * h * 0.3 * min(1.0, h / 0.03), 0.004))
     release_z = float(max(h + skill["drop"] + 0.002, 0.013))
-    if task.get("stack"):  # set it down on top of the other object
-        ref = task["ref"]
-        release_z = float(world.obj_pos(ref, d)[2] + world.half(ref) + h + skill["drop"] + 0.006)
-        carry = float(min(max(carry, release_z + 0.05), carry_max))
     ox, oy = o[0] + off[0], o[1] + off[1]          # the tool stands beside the object for a single-jaw gripper
     gx, gy = goal[0] + off[0], goal[1] + off[1]
+    if task.get("stack"):  # set it down on top of the other object
+        ref = task["ref"]
+        top = float(world.obj_pos(ref, d)[2] + world.half(ref))
+        carry = float(min(max(carry, top + h + skill["drop"] + 0.056), carry_max, world.path_ceiling((ox, oy), (gx, gy), me)))
+        # what hangs below the tool must clear the other object's top: under a low ceiling, hold it lower down
+        bottom = float(o[2] - h)
+        grasp_z = float(max(min(grasp_z, carry - STACK_CLEAR - top + bottom), bottom + 0.004, 0.004))
+        hang = world.stack_hang(me, grasp_z - bottom)
+        release_z = float(min(top + max(h, hang) + skill["drop"] + 0.006, carry))
     steps = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
              ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
              ("move", [gx, gy, carry])]
@@ -126,17 +131,12 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
 def with_drives(world: World, steps: list, pick, place, me: str) -> list:
     """A mobile base drives first when the object, or later the place, is out of the arm's reach from where it stands:
     drive, stop, then the arm moves as on a fixed base."""
-    pose = world.hand.base.copy()
+    (_, at_pick), (_, at_place) = world.stands(pick, place, me)
     out = list(steps)
-    if not world.reachable_from(pose, pick):
-        at = world.standoff(pick, ignore=me)
-        if at is not None:
-            out.insert(0, ("drive", at.tolist()))
-            pose = at
-    if not world.reachable_from(pose, place):
-        at = world.standoff(place, ignore=me, near=pose[:2])
-        if at is not None:
-            out.insert(out.index(("grip", 1.0)) + 2, ("drive", at.tolist()))     # after lifting it
+    if at_pick is not None:
+        out.insert(0, ("drive", at_pick.tolist()))
+    if at_place is not None:
+        out.insert(out.index(("grip", 1.0)) + 2, ("drive", at_place.tolist()))     # after lifting it
     return out
 
 

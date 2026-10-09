@@ -17,8 +17,9 @@ What a skill may rely on, and what a real arm must therefore provide:
              stop() / resume()      emergency stop (torque off on a real arm)
   Scene      obj_pos(name), tilt(name)   where an object is, how far it leans   real: the twin's belief; a camera later (PR12)
              things(), half(), radius(), tallest(), layout        sizes and places from the scan (the twin)
-  Geometry   reachable(xy), can_grasp(name), refusal(name, goal), grasp_offset(name), grasp_yaw(name),
-             carry_height(), workspace_sample(rng)               from the arm descriptor and the twin's IK
+  Geometry   reachable(xy), can_grasp(name), refusal(name, goal, on), grasp_offset(name), grasp_yaw(name),
+             carry_height(), path_ceiling(a, b), stack_hang(name),
+             workspace_sample(rng)                                from the arm descriptor and the twin's IK
   Planning   twin                   the World used to imagine (for the sim back-end: itself); clone() copies its state
 
 `d` and `hs` arguments (MjData and HandState) select a copy made by `clone()`: they always refer to the twin.
@@ -31,7 +32,8 @@ import numpy as np
 
 CONTRACT = ("step", "hand_pos", "grip_settled", "go_rest", "stop", "resume", "close", "obj_pos", "tilt", "things", "half",
             "radius", "tallest", "reachable", "can_grasp", "refusal", "grasp_offset", "grasp_yaw", "carry_height",
-            "workspace_sample", "clone", "settle", "arm_ready", "observe", "observe_pose", "set_obj_pose", "see_tool")
+            "path_ceiling", "stack_hang", "workspace_sample", "clone", "settle", "arm_ready", "observe", "observe_pose",
+            "set_obj_pose", "see_tool")
 
 
 @runtime_checkable
@@ -61,7 +63,7 @@ class Backend(Protocol):
     def tallest(self) -> float: ...
     def reachable(self, xy, z: float = 0.02) -> bool: ...
     def can_grasp(self, name: str) -> tuple: ...
-    def refusal(self, name: str, goal_xy=None) -> str: ...
+    def refusal(self, name: str, goal_xy=None, on: str | None = None) -> str: ...
     def grasp_offset(self, name: str) -> np.ndarray: ...
     def grasp_yaw(self, name: str) -> float: ...
     def carry_height(self) -> float: ...
