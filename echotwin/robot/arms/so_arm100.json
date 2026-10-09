@@ -11,6 +11,7 @@
   "pads": ["_pad_"],
   "home": [0.0, -1.57, 1.57, 1.57, -1.57],
   "max_opening": 0.07,
+  "tilts_deg": [0, 20, 40],
   "real": {
     "about": "Placeholders. Fill in from your arm (python -m echotwin.robot.feetech --read, docs/REAL_ARM.md), then set calibrated to true.",
     "baudrate": 1000000, "ids": [1, 2, 3, 4, 5], "gripper_id": 6,

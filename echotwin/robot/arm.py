@@ -104,6 +104,7 @@ class ArmSpec:
     source: Path | None = None
     scale: float = 1.0              # the arm k times its described size (see sized and resize)
     pad_contact: dict | None = None  # how the pads touch: {"friction": [slide, spin, roll], "condim": 4, ...} (see pad_tune)
+    tilts: tuple = (0.0,)           # radians the gripper may lean outward from straight down, smallest first (tilts_deg)
 
     @property
     def mjcf_path(self) -> Path | None:
@@ -182,7 +183,19 @@ def parse(d: dict, source: Path | None = None) -> ArmSpec:
                    actuators=list(d["actuators"]), gripper=dict(g), tool=dict(d["tool"]), pads=list(d["pads"]),
                    home=[float(v) for v in d["home"]], prefix=d.get("prefix", PREFIX),
                    mount_yaw_deg=float(d.get("mount_yaw_deg", 0.0)), max_opening=d.get("max_opening"),
-                   download=d.get("download"), real=d.get("real"), source=source, pad_contact=d.get("pad_contact"))
+                   download=d.get("download"), real=d.get("real"), source=source, pad_contact=d.get("pad_contact"),
+                   tilts=_tilts(d.get("tilts_deg", [0])))
+
+
+def _tilts(deg) -> tuple:
+    """tilts_deg -> radians, smallest first, always starting with straight down (0)."""
+    try:
+        vals = sorted({0.0, *(float(v) for v in deg)})
+    except (TypeError, ValueError):
+        raise ArmError("tilts_deg: a list of angles in degrees, like [0, 25, 45].")
+    if vals[0] < 0 or vals[-1] > 80:
+        raise ArmError("tilts_deg: angles between 0 and 80 degrees.")
+    return tuple(float(np.radians(v)) for v in vals)
 
 
 # ---------------- putting the arm into a scene ----------------
@@ -384,11 +397,24 @@ class ArmIK:
         mujoco.mj_kinematics(self.m, s)
         return s.site_xpos[self.site].copy(), s.site_xmat[self.site].reshape(3, 3).copy()
 
-    def _solve(self, target, yaw, q0, iters):
-        s = self.scratch
-        q = np.clip(np.asarray(q0, float), self.lo, self.hi)
+    def _aim(self, target, yaw, tilt):
+        """The tool's pointing direction and jaw-closing direction for a target: straight down, or leaning `tilt` radians
+        outward from the base (like an arm reaching out); the closing direction stays square to the pointing one."""
         down = np.array([0.0, 0.0, -1.0])
         close = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+        if not tilt:
+            return down, close
+        out = np.asarray(target, float)[:2] - self.base[:2]
+        n = float(np.linalg.norm(out))
+        out = out / n if n > 1e-6 else np.array([0.0, 1.0])
+        point = np.cos(tilt) * down + np.sin(tilt) * np.array([out[0], out[1], 0.0])
+        close = close - (close @ point) * point
+        return point, close / np.linalg.norm(close)
+
+    def _solve(self, target, yaw, q0, iters, tilt=0.0):
+        s = self.scratch
+        q = np.clip(np.asarray(q0, float), self.lo, self.hi)
+        down, close = self._aim(target, yaw, tilt)
         jp = np.zeros((3, self.m.nv))
         jr = np.zeros((3, self.m.nv))
         e_pos = np.ones(3)
@@ -410,14 +436,15 @@ class ArmIK:
             q = np.clip(q + 0.8 * dq, self.lo, self.hi)
         return q, float(np.linalg.norm(e_pos)), float(np.linalg.norm(e_rot))
 
-    def solve(self, target, yaw, q0, iters=60):
-        """-> (joint values, position error in m, orientation error). Warm start first, then restarts."""
-        q, ep, er = self._solve(target, yaw, q0, 6)
+    def solve(self, target, yaw, q0, iters=60, tilt=0.0):
+        """-> (joint values, position error in m, orientation error). Warm start first, then restarts.
+        `tilt`: radians the tool leans outward from pointing straight down (see _aim)."""
+        q, ep, er = self._solve(target, yaw, q0, 6, tilt)
         if ep < 2e-3 and er < 2e-2:
             return q, ep, er
         best = (ep + 0.05 * er, q, ep, er)
         for seed in (q0, self.q_down):
-            q, ep, er = self._solve(target, yaw, seed, iters)
+            q, ep, er = self._solve(target, yaw, seed, iters, tilt)
             if ep + 0.05 * er < best[0]:
                 best = (ep + 0.05 * er, q, ep, er)
             if ep < 1e-3 and er < 1e-2:
@@ -436,17 +463,20 @@ class Workspace:
     HEIGHTS = np.array([0.006, 0.02, 0.05, 0.09, 0.13, 0.17, 0.22])
     _cache: dict = {}
 
-    def __init__(self, ik: "ArmIK", pan_half_range: float, scale: float = 1.0):
+    def __init__(self, ik: "ArmIK", pan_half_range: float, scale: float = 1.0, tilts=(0.0,)):
         self.pan = pan_half_range
         self.RADII, self.HEIGHTS = self.RADII * scale, self.HEIGHTS * scale    # the grid is as big as the arm
-        self.ok = np.zeros((len(self.RADII), len(self.HEIGHTS)), bool)
-        q = ik.q_down
-        for i, r in enumerate(self.RADII):
-            for j, z in enumerate(self.HEIGHTS):
-                q2, ep, er = ik.solve(ik.base + np.array([0.0, r, z]), 0.0, q, iters=200)
-                self.ok[i, j] = ep < 2e-3 and er < 0.08
-                if self.ok[i, j]:
-                    q = q2
+        self.tilts = tuple(tilts)
+        self.oks = np.zeros((len(self.tilts), len(self.RADII), len(self.HEIGHTS)), bool)     # per tilt
+        for k, tilt in enumerate(self.tilts):
+            q = ik.q_down
+            for i, r in enumerate(self.RADII):
+                for j, z in enumerate(self.HEIGHTS):
+                    q2, ep, er = ik.solve(ik.base + np.array([0.0, r, z]), 0.0, q, iters=200, tilt=tilt)
+                    self.oks[k, i, j] = ep < 2e-3 and er < 0.08
+                    if self.oks[k, i, j]:
+                        q = q2
+        self.ok = self.oks.any(axis=0)                        # reachable with some tilt
         low = self.ok[:, 1]                                   # table height
         if not low.any():
             raise ArmError("The arm cannot reach the table top with its tool pointing down.")
@@ -455,16 +485,27 @@ class Workspace:
 
     @classmethod
     def for_arm(cls, ik: "ArmIK", arm: ArmSpec) -> "Workspace":
-        key = (arm.name, str(arm.source), arm.mount_yaw_deg, round(arm.scale, 4), round(ik.mount, 4))
+        key = (arm.name, str(arm.source), arm.mount_yaw_deg, round(arm.scale, 4), round(ik.mount, 4), arm.tilts)
         if key not in cls._cache:
             lo, hi = ik.lo[0], ik.hi[0]
-            cls._cache[key] = cls(ik, float(min(abs(lo), abs(hi)) - 0.05), arm.scale)
+            cls._cache[key] = cls(ik, float(min(abs(lo), abs(hi)) - 0.05), arm.scale, arm.tilts)
         return cls._cache[key]
 
     def z_max(self, r: float) -> float:
         i = int(np.clip(np.searchsorted(self.RADII, r), 0, len(self.RADII) - 1))
         col = np.nonzero(self.ok[i])[0]
         return float(self.HEIGHTS[col.max()]) if len(col) else 0.0
+
+    def tilt_for(self, rel_xy, z: float) -> float:
+        """The smallest tilt that reaches this spot (relative to the base) at this height; the largest when none does."""
+        if len(self.tilts) == 1:
+            return self.tilts[0]
+        i = int(np.clip(np.searchsorted(self.RADII, float(np.hypot(*rel_xy))), 0, len(self.RADII) - 1))
+        j = int(np.clip(np.searchsorted(self.HEIGHTS, z), 0, len(self.HEIGHTS) - 1))
+        for k, tilt in enumerate(self.tilts):
+            if self.oks[k, i, j]:
+                return tilt
+        return self.tilts[-1]
 
     def reachable(self, rel_xy, z: float = 0.02) -> bool:
         """rel_xy: position relative to the base."""
