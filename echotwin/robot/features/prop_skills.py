@@ -14,7 +14,7 @@ import os
 
 import numpy as np
 
-from ..world import VMAX, World
+from ..world import CTRL_DT, VMAX, World
 from . import measure as M
 from . import move_things as MT
 
@@ -141,6 +141,9 @@ def with_drives(world: World, steps: list, pick, place, me: str) -> list:
 
 
 # ---------------- the closed loop: look, check, retry ----------------
+FAR_ABOVE = 0.01          # m: a step this far out of the arm's reach is done at the nearest reachable point
+SETTLED = 0.003           # m/s: slower than this, for STILL_TICKS in a row, the tool and what it carries are at rest
+STILL_TICKS = 15
 MAX_ATTEMPTS = 3          # the first try and two retries, then the robot asks to be shown
 SEEN_MOVED = 0.015        # the object is this far from where it was believed: say so
 LOOK_TICKS = 3            # hold still this long before looking, so the arm and the picture settle
@@ -367,17 +370,46 @@ def waypoint_action(world: World, r: dict, d=None, hs=None):
         r["wait"] = r.get("wait", 0) + 1
         if r["wait"] >= 4 and (world.grip_settled(d) or r["wait"] >= 25):
             r["i"], r["wait"] = r["i"] + 1, 0
+            r["hold"] = arg > 0.5
         return np.array([0, 0, 0, arg, r.get("yaw", 0.0)])
-    dv = np.array(arg) - world.hand_pos(d)
-    n = np.linalg.norm(dv)
+    target = np.array(arg, float)
+    if r.get("hold") and hs.held:                         # steer the object, not the tool point (see _held_off)
+        target[:2] -= _held_off(world, d, hs)
+    reachable = world._clamp(target, hs)                   # where the arm can really go
+    clamped = bool(np.linalg.norm(reachable - target) > FAR_ABOVE)
+    here = world.hand_pos(d)
+    dv = target - here                                     # still aimed at the step (aiming higher slows the carry: less swing)
+    n = np.linalg.norm(reachable - here if clamped else dv)  # but done once it is where it can get to
     r["ticks"] = r.get("ticks", 0) + 1
-    if n < 0.003 or r["ticks"] > 80:  # reached, or unreachable: move on rather than hang
+    # a step above the arm's ceiling is reached at the ceiling, once the tool and what it carries have come to rest (a tall
+    # thing swings), instead of waiting out the tick limit
+    moving = r.get("last") is not None and np.linalg.norm(here - r["last"]) / CTRL_DT > SETTLED
+    if hs.held:
+        o = world.obj_pos(hs.held, d)
+        moving = moving or (r.get("last_obj") is not None and np.linalg.norm(o - r["last_obj"]) / CTRL_DT > SETTLED)
+        r["last_obj"] = o
+    r["last"] = here
+    r["still"] = 0 if moving else r.get("still", 0) + 1
+    if n < 0.003 and (not clamped or r["still"] >= STILL_TICKS) or r["ticks"] > 80:  # reached, or unreachable: move on
         r["i"] += 1
         r["ticks"] = 0
+        r["last"] = r["last_obj"] = None
+        r["still"] = 0
     v = dv * 5.0
     if np.linalg.norm(v) > r["speed"]:
         v *= r["speed"] / np.linalg.norm(v)
     return np.array([*v, 1.0 if hs.grip else 0.0, r.get("yaw", 0.0)])
+
+
+def _held_off(world: World, d, hs) -> np.ndarray:
+    """How far the held thing is from where the plan expects it, beside the tool point (x, y). A single moving jaw holds it
+    off-centre against the fixed jaw: the plan puts the tool `grasp_offset` beside it, but the thing sits a few mm further
+    out and swings around the tool point when the wrist turns on the way. The moves that carry it are corrected by this,
+    so the thing, not the tool point, follows the plan. A parallel gripper holds it centred: no correction."""
+    if world.arm.gripper["mode"] != "single" or not hs.held:
+        return np.zeros(2)
+    seen = world.obj_pos(hs.held, d)[:2] - world.hand_pos(d)[:2]
+    return seen + world.grasp_offset(hs.held)[:2]
 
 
 def imagine(world: World, task: dict, wps: list, speed: float) -> dict:

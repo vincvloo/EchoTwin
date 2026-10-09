@@ -42,6 +42,7 @@ actuators, and these fields:
 | `home` | Five joint values to start from |
 | `max_opening` | How far the jaws open, in metres (objects wider than this are declined) |
 | `download` | Optional: repo, commit, path and files for `--download` |
+| `pad_contact` | Optional: how the pads touch things, set on the pad geoms when the arm is loaded (your MJCF stays as it is): `friction` (slide, spin, roll), `condim` (4 adds spin friction), `solref`, `solimp`, `margin` |
 
 Names are looked up in your MJCF, so the order of things inside it does not matter. A wrong name gives an error that
 says which one. Then run `python -m echotwin.robot.arm --check path/to/my_arm.json`. If the cube or cylinder fails,
@@ -85,3 +86,20 @@ the built-in arm only. Below 0.75 the built-in arm can hardly reach the table, s
 Sizes of the objects: from one photo they are estimates. If you know how wide one object really is, "Rescale the table"
 scales the table, its objects and the camera by one factor; the arm does not change. Any factor is fine as long as the
 result is plausible: every thing between 5 mm and 2 m, the mapped area at most 20 m wide.
+
+## The SO-ARM100: what is fixed, what is not (measured)
+
+A single moving jaw holds a thing off-centre, pressed against the fixed jaw. Two fixes in the skill (`prop_skills`):
+
+- **The thing, not the tool point, follows the plan.** When the wrist turns on the way, the held thing swung around the tool
+  point and landed about 1.3 cm off. Moves that carry something are corrected by where the thing really is (`_held_off`);
+  a box or a round case now lands 5 to 6 mm from the spot. A parallel gripper is not affected.
+- **No waiting at the ceiling.** The plan asked for a carry height above the SO-ARM100's ceiling at that distance (5 cm),
+  so every such step waited out the 80-tick limit. A step more than 1 cm out of reach is now done once the tool is where it
+  can get to and at rest; it is still aimed at the step, which keeps the carry slow enough that tall things do not swing.
+
+Skill table (`skillcheck`, 6 trials per cell, same seed): the SO-ARM100 goes from 19 % to 18 % (the same within noise) but
+runs 5 times faster (16 instead of 80 minutes); the built-in arm stays at 94 % (89 % on the 12-trial cylinder and ball check,
+as before). What still fails: flat things (part of the gripper lands on them on the way down), stacking, and anything set
+down far from the base, where its ceiling drops to 2 cm and it drags the thing along the table. Its cylinder (7 cm) is wider
+than its jaws: declined, not failed. Higher pad friction (`pad_contact`) did not help.
