@@ -42,6 +42,7 @@ actuators, and these fields:
 | `home` | Five joint values to start from |
 | `max_opening` | How far the jaws open, in metres (objects wider than this are declined) |
 | `download` | Optional: repo, commit, path and files for `--download` |
+| `tilts_deg` | Optional: angles the gripper may lean outward from straight down, like `[0, 20, 40]`. The reach is measured for each, and the arm leans only as far as a spot needs (default `[0]`: always straight down) |
 | `pad_contact` | Optional: how the pads touch things, set on the pad geoms when the arm is loaded (your MJCF stays as it is): `friction` (slide, spin, roll), `condim` (4 adds spin friction), `solref`, `solimp`, `margin` |
 
 Names are looked up in your MJCF, so the order of things inside it does not matter. A wrong name gives an error that
@@ -98,8 +99,28 @@ A single moving jaw holds a thing off-centre, pressed against the fixed jaw. Two
   so every such step waited out the 80-tick limit. A step more than 1 cm out of reach is now done once the tool is where it
   can get to and at rest; it is still aimed at the step, which keeps the carry slow enough that tall things do not swing.
 
-Skill table (`skillcheck`, 6 trials per cell, same seed): the SO-ARM100 goes from 19 % to 18 % (the same within noise) but
-runs 5 times faster (16 instead of 80 minutes); the built-in arm stays at 94 % (89 % on the 12-trial cylinder and ball check,
-as before). What still fails: flat things (part of the gripper lands on them on the way down), stacking, and anything set
-down far from the base, where its ceiling drops to 2 cm and it drags the thing along the table. Its cylinder (7 cm) is wider
-than its jaws: declined, not failed. Higher pad friction (`pad_contact`) did not help.
+Then three more (PR "tilted grasps"):
+
+- **The fixed jaw on the side the arm can really hold it.** Closing the jaws along a line can be done two ways round, and the
+  arm solver accepted either. The wrist cannot always turn half a turn, so at some spots it held the jaws the other way round
+  and the fixed jaw came down on top of the thing instead of beside it: the "lands 12 cm off" failures were things that were
+  never picked up. `World.grasp_yaw` now asks the arm which way round it can hold its jaws over the thing (single jaw only).
+- **A wider gap for the fixed jaw** (8 mm instead of 3): at long reach the arm is not precise enough to come down 3 mm beside
+  a thing without catching its edge. Cost: the thing ends up about 1 cm less precisely placed when the jaw lets go.
+- **Tilted grasps** (`tilts_deg: [0, 20, 40]`): the gripper leans outward when straight down cannot reach. At 5 cm height it
+  now works 12 to 36 cm from its base (was 12 to 30), at 9 cm 18 to 34 (was 18 to 24), so far from its base it carries at
+  5 cm instead of dragging at 2. The skill table does not show it (its spots are all within the straight-down reach): the
+  table gives 31 % with or without tilting.
+
+Skill table (`skillcheck`, 6 trials per cell, same seed):
+
+| SO-ARM100 | next to | to the left | on top of |
+|---|---|---|---|
+| flat | 0 -> 33 % | 0 -> 33 % | 0 -> 17 % |
+| box | 50 -> 83 % | 33 -> 50 % | 0 -> 17 % |
+| round | 83 -> 83 % | 67 -> 50 % | 0 -> 0 % |
+| all | | | 19 -> 31 % |
+
+Its cylinder (7 cm) is wider than its jaws: declined, not failed, so 31 % is about 42 % of what it can hold at all. The
+built-in arm stays at 94 % (same demos, messages and positions as before). What still fails most: stacking (it tips over
+or slides off) and round things carried to the side. Higher pad friction (`pad_contact`) did not help.

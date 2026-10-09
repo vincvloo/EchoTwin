@@ -21,6 +21,8 @@ JOINT_SPEED = 2.5           # rad/s, how fast the servos may move their setpoint
 Z_MIN = 0.004               # lowest tool height above the table
 BASE_INSET = 0.07           # the arm's base stands this far in from the front edge of the table
 REST_RISE = 0.14            # resting tool height
+TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
+FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
 MIN_THICKNESS = 0.015       # thinner than this cannot be pinched from a table (measured, docs/RESULTS.md)
 
@@ -35,6 +37,7 @@ class HandState:
     held: str | None = None                                            # the object the pads squeeze right now
     base: np.ndarray = field(default_factory=lambda: np.zeros(3))      # where the base stands: x, y, turn (a fixed one never moves)
     drive: np.ndarray | None = None                                    # where a mobile base is driving to, or None
+    tilt: float = 0.0                                                  # how far the tool leans out from straight down (rad)
 
     @property
     def attached(self) -> str | None:
@@ -42,7 +45,7 @@ class HandState:
 
     def clone(self) -> "HandState":
         return HandState(self.grip, self.target.copy(), self.yaw, self.q.copy(), self.held, self.base.copy(),
-                         None if self.drive is None else self.drive.copy())
+                         None if self.drive is None else self.drive.copy(), self.tilt)
 
 
 class World:
@@ -244,9 +247,29 @@ class World:
         pr = self.layout.props[int(name[5:])]
         hx, hy, _ = pr["size"]
         yaw = np.radians(float(pr.get("yaw", 0.0)))
-        if pr.get("shape") in ("cylinder", "round") or hx <= hy:
+        if not (pr.get("shape") in ("cylinder", "round") or hx <= hy):
+            yaw = yaw + np.pi / 2
+        if self.arm.gripper["mode"] != "single":
             return float(yaw)
-        return float(yaw + np.pi / 2)
+        return self._jaw_side(name, float(yaw))
+
+    def _jaw_side(self, name: str, yaw: float) -> float:
+        """A single moving jaw: which way round the arm can hold its jaws over this object. Closing along yaw or along
+        yaw + pi is the same line, but it decides on which side the fixed jaw stands, and the plan puts the fixed jaw beside
+        the thing (grasp_offset). The wrist cannot always turn half a turn, so ask the arm, and use the way it can do."""
+        o = self.obj_pos(name)
+        key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(self.hand.base, 3)))
+        cache = self.__dict__.setdefault("_jaw_cache", {})
+        if key not in cache:
+            if len(cache) > 256:
+                cache.clear()
+            at = np.array([o[0], o[1], o[2] + 0.03])
+            self.ik.set_base(self.hand.base)
+            tilt = self.workspace.tilt_for(self._rel(at, self.hand.base), float(at[2]))
+            q, _, _ = self.ik.solve(at, yaw, self.ik.q_down, iters=150, tilt=tilt)
+            jaws = self.ik.pose(q)[1] @ self.ik.c_axis
+            cache[key] = yaw if jaws @ np.array([np.cos(yaw), np.sin(yaw), 0.0]) >= 0 else yaw + np.pi
+        return cache[key]
 
     def auto_yaw(self, xy) -> float:
         """Jaw direction for a hand steered by a person: aligned with the nearest object within 10 cm, else unchanged."""
@@ -324,7 +347,7 @@ class World:
             return np.zeros(3)
         y = self.grasp_yaw(name)
         side = float(self.arm.gripper.get("fixed_side", 1))
-        return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + 0.003)
+        return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
 
     # ---------- queries ----------
     def hand_pos(self, d=None) -> np.ndarray:
@@ -384,7 +407,10 @@ class World:
             hs.yaw = float(a[4])
         hs.target = self._clamp(hs.target + v * CTRL_DT, hs)
         hs.grip = bool(a[3] > 0.5)
-        q, _, _ = self.ik.solve(hs.target, hs.yaw, hs.q)
+        if len(self.arm.tilts) > 1:                 # lean out only as far as this spot needs, a little at a time
+            want = self.workspace.tilt_for(self._rel(hs.target, hs.base), float(hs.target[2]))
+            hs.tilt += float(np.clip(want - hs.tilt, -TILT_RATE * CTRL_DT, TILT_RATE * CTRL_DT))
+        q, _, _ = self.ik.solve(hs.target, hs.yaw, hs.q, tilt=hs.tilt)
         hs.q = hs.q + np.clip(q - hs.q, -JOINT_SPEED * CTRL_DT, JOINT_SPEED * CTRL_DT)
         return hs.q
 
@@ -489,6 +515,7 @@ class World:
         hs.target = self.rest_target()
         hs.grip = False
         hs.held = None
+        hs.tilt = 0.0
         if teleport:
             self.ik.set_base(hs.base)
             for a, v in zip(self.ik.base_qadr, hs.base):
