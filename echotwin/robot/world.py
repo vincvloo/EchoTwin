@@ -268,7 +268,8 @@ class World:
         pick, place = np.asarray(pick, float)[:2], np.asarray(place, float)[:2]
         if at_place is not None:                       # it drives on the way: lifts over the pick, lowers over the place
             return min(self.ceiling(pick, p0), self.ceiling(place, p1))
-        return min(self.ceiling(pick + (place - pick) * f, p0) for f in np.linspace(0.0, 1.0, 5))
+        n = max(2, int(np.ceil(np.linalg.norm(place - pick) / 0.01)) + 1)      # every centimetre: the ceiling is not smooth
+        return min(self.ceiling(pick + (place - pick) * f, p0) for f in np.linspace(0.0, 1.0, n))
 
     def palm(self, name: str) -> float:
         """How far the tool point can go down over this object's top before a part of the arm above the jaws

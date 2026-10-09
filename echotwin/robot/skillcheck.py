@@ -83,8 +83,11 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
         if w.can_grasp("prop_0")[0] is False:
             return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0}
         goal = MT.goal_xy(w, plan)
-        if not w.refusal("prop_0", goal, on="prop_1" if task_name == "on top of" else None):
+        why_not = w.refusal("prop_0", goal, on="prop_1" if task_name == "on top of" else None)
+        if not why_not:
             break
+    else:                           # 60 layouts and the arm would decline every one: it declines, it does not try
+        return {"ok": False, "why": f"refused: {why_not}", "seconds": 0.0}
     if backend == "mock":                       # the same move, on an arm that is not the simulation
         from .drivers import MockDriver
         from .real import RealBackend, mock_camera

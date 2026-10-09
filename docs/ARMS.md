@@ -198,3 +198,22 @@ What the balls still do wrong, and what did not help:
   trials (other spots became reachable and other paths were taken). Hovering lower, straight down, and waiting for the lean
   to settle before going down made no measurable difference. None of it is in this PR.
 - A ball set on a box sometimes rolls off it.
+
+Then the ball on a box (PR "ball stack"). It did not roll off: it hit the box on the way. The ceiling along the carry was
+looked at in 5 places; far out to the right the reach grid's ceiling dips (9 cm, then 5, then 9 again: cells where the solver
+did not find the pose), the carry ran through the dip, and the ball, hanging under the tool, hit the box's side. Now:
+
+- `World.path_ceiling` looks every centimetre along the way. Where the ball cannot clear the box, the arm says so ("I can't
+  lift it high enough over the box from here").
+- skillcheck draws up to 60 layouts the arm would do. When it declines all 60 it used to run the last one anyway, and the
+  knock counted as "bumps"; now the trial is "refused", as for a thing too wide for the jaws. The rates are the same (both
+  are failures), the reason is honest.
+
+Stacking, SO-ARM100, 12 trials, seeds 11 and 13 together: 52 -> 57 of 72 (flat 13 -> 16, box 19 -> 20, ball 20 -> 21).
+The built-in arm stays at 93 % and the scripted session is the same.
+
+The SO-ARM100 declines most ball-on-box stacks: of 80 random layouts, 65 because it cannot lift the ball high enough over the
+box (it needs the tool about 8 cm up over the box, and its grid ceiling is 5 cm over most of the table), 11 because it cannot
+get its jaws around the ball there, 4 it would do. The grid is cautious (rows 4 cm apart, the real ceiling is 2 to 3.5 cm
+higher in the middle of the reach), so a finer ceiling would let it stack more; the first try at that (see above) cost flat
+things and boxes elsewhere.

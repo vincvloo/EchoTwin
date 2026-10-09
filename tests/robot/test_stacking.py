@@ -79,3 +79,23 @@ def test_the_built_in_arm_stacks_a_ball_on_a_box():
 def test_the_so_arm100s_palm_is_measured_with_its_jaws_open():
     w = _world("box", (0.0, 0.0), (0.12, 0.06), arm=A.load("so_arm100"))
     assert 0.03 < w.palm("prop_0") < 0.09                                 # not the closed moving jaw, nor a visual-only mesh
+
+
+def test_the_path_ceiling_is_looked_at_every_centimetre():
+    w = _world("box", (0.0, 0.0), (0.12, 0.06))
+    a, b = np.array([-0.2, -0.1]), np.array([0.25, -0.15])
+    every_cm = min(w.ceiling(a + (b - a) * f) for f in np.linspace(0.0, 1.0, 200))
+    assert w.path_ceiling(a, b) == pytest.approx(every_cm)
+
+
+@pytest.mark.skipif(A.load("so_arm100").missing_files() != [], reason="so_arm100 is not downloaded")
+def test_a_dip_in_the_ceiling_on_the_way_is_not_missed():
+    """Far out to the right the SO-ARM100's ceiling dips on the way to the box: carrying over it, the ball hit the box."""
+    w = _world("round", (-0.134, -0.022), (0.275, -0.15), arm=A.load("so_arm100"))
+    assert "high enough" in w.refusal("prop_0", _stack(w)["goal"], on="prop_1")
+
+
+def test_skillcheck_reports_a_layout_the_arm_declines_as_refused(monkeypatch):
+    monkeypatch.setattr(World, "refusal", lambda self, name, goal_xy=None, on=None: "it is out of my reach")
+    r = S.trial("box", "next to", np.random.default_rng(0))
+    assert not r["ok"] and r["why"] == "refused: it is out of my reach" and S.reason_key(r["why"]) == "refused"
