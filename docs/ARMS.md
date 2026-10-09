@@ -150,3 +150,29 @@ on the whole table (one cylinder stack in different layouts), 88 -> 93 % and 89 
 seeds 8 and 9); on the same layouts its cylinder stacks fail less (6 of 16 before, 3 of 16 after, one layout now declined).
 A scripted session gives the same messages and positions as before. What still fails: flat things slip out of the single jaw
 when lifted, and balls tip over when set down.
+
+Then the flat things (PR "flat grip"). They did not slip: the jaws were not across them. Three causes, all in which way round
+the single jaw goes (`World._jaw_side`):
+
+- **The wrist falls short.** Its roll stops at 160 degrees each way, so on the right of the table, turning the jaws to 90
+  degrees fell 50 to 70 degrees short. The old check only asked "more this way than the other", so it kept that direction;
+  the moving jaw then caught the end of the thing and the fixed jaw sat on top of it. Now the arm is asked both ways round,
+  where the tool will really stand beside the thing, low down; when the way asked works (reachable, within 30 degrees, the
+  arm clear of itself) it is kept, else the better one is used.
+- **The open jaw hits the arm.** Close to the base the arm folds up and the open jaw swings into its shoulder
+  (`World._hits_itself`, on the solver's copy). Where neither way round works the arm now says "I can't get my jaws around it
+  from here" (a fixed base; about 12 cm in front of the base and at the far edge of the reach).
+- **The side chosen again while carrying.** The correction that keeps a held thing on the plan (`_held_off`) asked for the
+  jaw side again from where the thing was at that moment. When the answer flipped, the correction jumped by 7 cm and the
+  thing was swung off. It now uses the side the jaws really hold it from (`grasp_offset(name, yaw)`).
+
+| SO-ARM100 | next to | to the left | on top of |
+|---|---|---|---|
+| flat | 33 -> 67 % | 33 -> 83 % | 50 -> 67 % |
+| box | 83 -> 83 % | 83 -> 100 % | 67 -> 67 % |
+| round | 83 -> 67 % | 50 -> 83 % | 50 -> 50 % |
+| all | | | 44 -> 56 % |
+
+With 12 trials (seed 11), flat 67 / 75 / 25 % -> 75 / 100 / 50 %, box 50 / 67 / 50 % -> 67 / 100 / 75 %, round
+75 / 83 / 83 % -> 75 / 83 / 75 % (one trial). 56 % is about 75 % of what its jaws can hold. The built-in arm (two pads)
+is not affected: the same results in every cell, the same scripted session.

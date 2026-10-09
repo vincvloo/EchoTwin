@@ -409,7 +409,7 @@ def _held_off(world: World, d, hs) -> np.ndarray:
     if world.arm.gripper["mode"] != "single" or not hs.held:
         return np.zeros(2)
     seen = world.obj_pos(hs.held, d)[:2] - world.hand_pos(d)[:2]
-    return seen + world.grasp_offset(hs.held)[:2]
+    return seen + world.grasp_offset(hs.held, hs.yaw)[:2]          # the side it was gripped from, not chosen again
 
 
 def imagine(world: World, task: dict, wps: list, speed: float) -> dict:
