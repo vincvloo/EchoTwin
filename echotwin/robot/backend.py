@@ -16,6 +16,7 @@ What a skill may rely on, and what a real arm must therefore provide:
              go_rest()              park the arm
              stop() / resume()      emergency stop (torque off on a real arm)
   Scene      obj_pos(name), tilt(name)   where an object is, how far it leans   real: the twin's belief; a camera later (PR12)
+             has_up(name)           does it matter which way up it lies (not for a ball)
              things(), half(), radius(), tallest(), layout        sizes and places from the scan (the twin)
   Geometry   reachable(xy), can_grasp(name), refusal(name, goal, on), grasp_offset(name), grasp_yaw(name),
              carry_height(), path_ceiling(a, b), stack_hang(name),
@@ -30,8 +31,8 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
-CONTRACT = ("step", "hand_pos", "grip_settled", "go_rest", "stop", "resume", "close", "obj_pos", "tilt", "things", "half",
-            "radius", "tallest", "reachable", "can_grasp", "refusal", "grasp_offset", "grasp_yaw", "carry_height",
+CONTRACT = ("step", "hand_pos", "grip_settled", "go_rest", "stop", "resume", "close", "obj_pos", "tilt", "has_up", "things",
+            "half", "radius", "tallest", "reachable", "can_grasp", "refusal", "grasp_offset", "grasp_yaw", "carry_height",
             "path_ceiling", "stack_hang", "workspace_sample", "clone", "settle", "arm_ready", "observe", "observe_pose",
             "set_obj_pose", "see_tool")
 

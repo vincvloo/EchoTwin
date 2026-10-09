@@ -26,6 +26,7 @@ JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing whic
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
 STACK_CLEAR = 0.015         # m: a carried object's bottom passes this far above the top it is to be set on
+BALL_ROUNDNESS = 1.15       # a round thing whose sizes are within 15 % of each other is a ball: it has no up (has_up)
 MIN_THICKNESS = 0.015       # thinner than this cannot be pinched from a table (measured, docs/RESULTS.md)
 
 
@@ -219,6 +220,12 @@ class World:
         """Height of the tallest thing on the table: objects and fixed obstacles."""
         hs = [2 * self.half(n) for n in self.things()] + [2 * o["size"][2] for o in self.layout.obstacles]
         return max(hs, default=0.0)
+
+    def has_up(self, name: str) -> bool:
+        """Does it matter which way up it lies? Not for a ball: a round thing about as tall as it is wide, every way."""
+        pr = self.layout.props[int(name[5:])]
+        size = np.asarray(pr["size"], float)
+        return not (pr.get("shape") == "round" and not pr.get("mesh") and size.max() <= BALL_ROUNDNESS * size.min())
 
     def things(self) -> list[str]:
         """Everything the gripper might pick up."""

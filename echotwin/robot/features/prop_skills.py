@@ -46,7 +46,8 @@ def make_task(world: World, plan: dict, heard: str) -> dict:
 
 # ---------------- geometry of success ----------------
 def tilt_deg(world: World, name: str, d=None) -> float:
-    return world.tilt(name, d)
+    """How far it leans (degrees); 0 for a ball, which looks the same however it lies (World.has_up)."""
+    return world.tilt(name, d) if world.has_up(name) else 0.0
 
 
 def goal_met(world: World, task: dict, d=None, hs=None) -> bool:
