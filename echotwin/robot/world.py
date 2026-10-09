@@ -22,6 +22,7 @@ Z_MIN = 0.004               # lowest tool height above the table
 BASE_INSET = 0.07           # the arm's base stands this far in from the front edge of the table
 REST_RISE = 0.14            # resting tool height
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
+JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_side)
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
 STACK_CLEAR = 0.015         # m: a carried object's bottom passes this far above the top it is to be set on
@@ -94,6 +95,8 @@ class World:
         self.ik.seed_down((0.0, 0.22))
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
         self._palms = {}
+        self.__dict__.pop("_robot_ids", None)
+        self.__dict__.pop("_jaw_cache", None)
         self.go_rest(teleport=True)
 
     # ---------- where the base stands ----------
@@ -278,7 +281,7 @@ class World:
         if self.arm.gripper["mode"] == "single":           # the object stands beside the fixed jaw (grasp_offset); here the jaws close along x
             centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP), 0, 0])
         r = 0.6 * min(self.radius(name), 0.5 * self.grasp_width(name) + 0.01)
-        robot = {b for b in range(m.nbody) if m.body(b).name.startswith(self.arm.prefix)}
+        robot = self._robot_bodies()
         geomid = np.zeros(1, np.int32)
         best = 1.0
         for dx, dy in ((0, 0), (r, 0), (-r, 0), (0, r), (0, -r)):
@@ -328,20 +331,56 @@ class World:
     def _jaw_side(self, name: str, yaw: float) -> float:
         """A single moving jaw: which way round the arm can hold its jaws over this object. Closing along yaw or along
         yaw + pi is the same line, but it decides on which side the fixed jaw stands, and the plan puts the fixed jaw beside
-        the thing (grasp_offset). The wrist cannot always turn half a turn, so ask the arm, and use the way it can do."""
+        the thing (grasp_offset). The wrist cannot always turn half a turn, near the base the arm cannot come down on the
+        side facing it, and folded up the open jaw can hit the arm: ask the arm both ways round, where the tool will stand,
+        and keep the way asked when it works, else the one it does best."""
+        return self._jaw_fits(name, yaw)[0][1]
+
+    def _jaw_fits(self, name: str, yaw: float) -> list:
+        """[(score, yaw, works)] for both ways round, the one to use first. `works`: the tool gets there, lined up (within
+        30 degrees), without the arm hitting itself."""
         o = self.obj_pos(name)
         key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(self.hand.base, 3)))
         cache = self.__dict__.setdefault("_jaw_cache", {})
         if key not in cache:
             if len(cache) > 256:
                 cache.clear()
-            at = np.array([o[0], o[1], o[2] + 0.03])
             self.ik.set_base(self.hand.base)
-            tilt = self.workspace.tilt_for(self._rel(at, self.hand.base), float(at[2]))
-            q, _, _ = self.ik.solve(at, yaw, self.ik.q_down, iters=150, tilt=tilt)
-            jaws = self.ik.pose(q)[1] @ self.ik.c_axis
-            cache[key] = yaw if jaws @ np.array([np.cos(yaw), np.sin(yaw), 0.0]) >= 0 else yaw + np.pi
+            side = float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
+            fits = []
+            for k, y in enumerate((yaw, yaw + np.pi)):
+                along = np.array([np.cos(y), np.sin(y), 0.0])
+                at = np.array([o[0], o[1], max(o[2], Z_MIN + 0.01)]) + along * side   # the tool beside it, low down
+                rel = self._rel(at, self.hand.base)
+                q, miss, _ = self.ik.solve(at, y, self.ik.q_down, iters=150, tilt=self.workspace.tilt_for(rel, float(at[2])))
+                lined_up = float(self.ik.pose(q)[1] @ self.ik.c_axis @ along)
+                reach, clear = self.workspace.reachable(rel, float(at[2])), not self._hits_itself(q)
+                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0)   # 1 cm off ~ 11 degrees
+                works = reach and clear and miss < 0.005 and lined_up > np.cos(np.radians(30))
+                fits.append((works, -k if works else 0, score, y))  # one that works, as asked first; else the best score
+            cache[key] = [(f[2], f[3], f[0]) for f in sorted(fits, reverse=True)]
         return cache[key]
+
+    def _hits_itself(self, q) -> bool:
+        """Would the arm at joint values q, jaws open, touch itself? (On the solver's scratch copy.)"""
+        m, s = self.model, self.ik.scratch
+        jaws = [int(m.jnt_qposadr[m.actuator_trnid[a][0]]) for a in self.gact]
+        was = s.qpos[jaws].copy()
+        s.qpos[jaws] = self.arm.gripper["open"]
+        for a, v in zip(self.ik.qadr, q):
+            s.qpos[a] = v
+        mujoco.mj_fwdPosition(m, s)
+        robot = self._robot_bodies()
+        hit = any(int(m.geom_bodyid[c.geom1]) in robot and int(m.geom_bodyid[c.geom2]) in robot and c.dist < 0
+                  for c in s.contact[:s.ncon])
+        s.qpos[jaws] = was
+        return hit
+
+    def _robot_bodies(self) -> set:
+        if not hasattr(self, "_robot_ids"):
+            m = self.model
+            self._robot_ids = {b for b in range(m.nbody) if m.body(b).name.startswith(self.arm.prefix)}
+        return self._robot_ids
 
     def auto_yaw(self, xy) -> float:
         """Jaw direction for a hand steered by a person: aligned with the nearest object within 10 cm, else unchanged."""
@@ -408,6 +447,8 @@ class World:
         else:
             if not self.reachable(self.obj_pos(name)[:2]):
                 return "it is out of my reach"
+            if self.arm.gripper["mode"] == "single" and not self._jaw_fits(name, self.grasp_yaw(name))[0][2]:
+                return "I can't get my jaws around it from here"
             if goal_xy is not None and not self.reachable(goal_xy):
                 return "the spot is out of my reach"
         if on is not None and goal_xy is not None:
@@ -418,12 +459,13 @@ class World:
                 return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here"
         return ""
 
-    def grasp_offset(self, name: str) -> np.ndarray:
+    def grasp_offset(self, name: str, yaw: float | None = None) -> np.ndarray:
         """Where the tool must stand relative to the object's centre (horizontal). Zero for a parallel gripper;
-        a single moving jaw closes against its fixed pad, so the fixed pad has to touch the object's side."""
+        a single moving jaw closes against its fixed pad, so the fixed pad has to touch the object's side.
+        `yaw`: the jaws' direction when it is already known (the thing is held), else the one grasp_yaw chooses."""
         if self.arm.gripper["mode"] != "single":
             return np.zeros(3)
-        y = self.grasp_yaw(name)
+        y = self.grasp_yaw(name) if yaw is None else float(yaw)
         side = float(self.arm.gripper.get("fixed_side", 1))
         return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
 
