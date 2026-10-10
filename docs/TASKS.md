@@ -44,6 +44,21 @@ In this order. Each step is only meaningful once the one before it is solid.
       going down. Result (`docs/RESULTS.md`): the position error at the grip halves (6.8 to 3.7 mm) but the tall cylinder improves only when the
       arm is badly off, so it is off by default. Open: a better measurement of the tool (a mark on the hand, a side view).
 
+## Geometry, not labels (2026-10): adaptable to whatever is photographed
+- [x] One geometry per object, from what the twin built (`features/geometry.py`): grip width and direction, "has an up",
+      mass from volume, the top outline for the hand's depth. Labels only draw.
+- [x] Scans build any standing thing from its outline when the outline is rounded or tapered, whatever it is called.
+- [x] Demos grouped by measured size class, not by shape label.
+- [x] The single jaw's gap scales with the arm (or the arm's own `fixed_gap`); the stacking clearance with the thing.
+- [x] Reach map: every ceiling found between the grid's rows, a stuck cell tried afresh, one lean per distance.
+- [x] Single jaw: chosen at grip height, against the table and itself, never leaning over the thing; round outlines
+      tried from 4 directions.
+- [x] Mobile base: stands where the grip and the stacking carry work.
+- [x] Stacking: says how much bigger an arm would need to be.
+- [x] skillcheck: a varied row (everyday objects, scanned-style meshes), per-cell draws, `--jobs`.
+- [ ] Thin things in a single jaw that rests on the table: the moving jaw's arc meets their top edge (a gripper limit).
+- [ ] Hardware: the servo driver, a real camera and the marker on a real capture are still untested.
+
 ## Open, not scheduled
 - [x] A non-YOLO detector test (OWLv2, Grounding DINO: Apache-2.0): neither beats YOLOE with the public vocabulary and both are slower
       (`docs/RESULTS.md`). Open: a mask source (box as mask, or SAM) if the AGPL dependency must go; small
