@@ -513,3 +513,16 @@ the same messages and positions; its recorded moves differ.
 Two changes were tried and taken out because these checks showed they hurt: finding the leaning ceilings between the
 grid's rows (the arm worked at the very edge of its leaning reach and thrashed), and a rule against the hand hanging over
 the thing when leaning (it chose sides the arm could not execute).
+
+## Tall things: in from the side (2026-10)
+
+On the SO-ARM100 tapered glasses and cups were the weakest of the varied objects. A glass 8 cm tall, where the arm
+reaches 8 cm: the open jaws hang 2 cm below the tool point (`World.jaw_drop`, measured on the arm), so they swept its rim
+on the way to the hover and knocked it over before the grip. Now, when the hover leaves the jaws less than 1 cm above a
+thing's top, the hand goes down beside it and slides in at grip height, along the jaws' plane so the open jaws pass on
+either side (`prop_skills._side_way`; a side spot clear of other things, at the same lean as the grip if there is one).
+
+Measured on the varied objects (30 per cell, same layouts): SO-ARM100 66 -> 68 of 90 at seed 21, 62 -> 64 at seed 33;
+its classic table 98 -> 97 of 144 (one box). The built-in arm reaches high enough to never need it: identical.
+Tried and left out: sliding out sideways after letting go (the fixed jaw dragged stacked things off), letting tall
+things go lower (the built-in arm's cylinders tipped), and the side approach when stacking (stacking got worse).

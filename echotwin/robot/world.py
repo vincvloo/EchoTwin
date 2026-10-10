@@ -112,6 +112,7 @@ class World:
         self.ik.seed_down((0.0, 0.22))
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
         self._palms = {}
+        self._jaw_drop = None
         self.__dict__.pop("_robot_ids", None)
         self.__dict__.pop("_gripper_ids", None)
         self.__dict__.pop("_jaw_cache", None)
@@ -379,6 +380,29 @@ class World:
         s.qpos[jaws] = was
         self._palms[key] = best
         return best
+
+    def jaw_drop(self) -> float:
+        """How far the open jaws hang below the tool point, pointing straight down (measured on the arm's own parts)."""
+        if getattr(self, "_jaw_drop", None) is not None:
+            return self._jaw_drop
+        m, s = self.model, self.ik.scratch
+        q, _, _ = self.ik.solve(self.ik.base + np.array([0.0, 0.5 * (self.workspace.r_min + self.workspace.r_max), 0.15]),
+                                0.0, self.ik.q_down)
+        jaws = [int(m.jnt_qposadr[m.actuator_trnid[a][0]]) for a in self.gact]
+        was = s.qpos[jaws].copy()
+        s.qpos[jaws] = self.arm.gripper["open"]
+        self.ik.pose(q)
+        tool = float(s.site_xpos[self.site][2])
+        low = tool
+        for g in range(m.ngeom):
+            if int(m.geom_bodyid[g]) not in self._gripper_bodies() or not (m.geom_contype[g] or m.geom_conaffinity[g]):
+                continue
+            c, R, half = s.geom_xpos[g], s.geom_xmat[g].reshape(3, 3), m.geom_aabb[g][3:]
+            corners = np.array(np.meshgrid([-1, 1], [-1, 1], [-1, 1])).T.reshape(-1, 3) * half + m.geom_aabb[g][:3]
+            low = min(low, float((c + corners @ R.T)[:, 2].min()))
+        s.qpos[jaws] = was
+        self._jaw_drop = max(tool - low, 0.0)
+        return self._jaw_drop
 
     def _jaw_free_yaw(self, name: str) -> float:
         """The direction across its narrowest width, before choosing which way round a single jaw goes."""
