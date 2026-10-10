@@ -217,3 +217,23 @@ box (it needs the tool about 8 cm up over the box, and its grid ceiling is 5 cm 
 get its jaws around the ball there, 4 it would do. The grid is cautious (rows 4 cm apart, the real ceiling is 2 to 3.5 cm
 higher in the middle of the reach), so a finer ceiling would let it stack more; the first try at that (see above) cost flat
 things and boxes elsewhere.
+
+Then the finer reach map (PR "straight ceiling"). The reach grid has rows 4 cm apart, and some rows were missed where the
+solver did not find the pose: for the SO-ARM100 the ceiling read 5 cm from 24 to 30 cm out, where the arm really reaches 9
+to 7.5 cm pointing straight down. Two changes:
+
+- **The straight-down ceiling is found between the rows** (`Workspace.tops`, bisection, to about 1 mm), for each distance
+  from the base. It is now a smooth curve (SO-ARM100: 2.6 cm at 10 cm out, 10 cm at 20 to 22 cm, 2.5 cm at 32 cm). The
+  ceilings when leaning out stay on the rows: refining those too (the first try) let the arm hover leaning over the thing it
+  was about to pick up.
+- **One lean per distance from the base** (`Workspace.column_tilt`), from the table to the ceiling: straight down where that
+  reaches about as high as leaning (SO-ARM100: up to 30 cm out), else the smallest lean that reaches the table and that
+  height. Before, the lean was chosen by height, so going down to a thing or up from it the arm could start leaning next to
+  it; the open jaw swung over a flat thing and flipped it.
+
+Results (SO-ARM100, 12 trials per cell, seeds 11 and 13, and flat at 17): 211 -> 211 of 252 in all. Balls 65 -> 69 of 72,
+boxes 64 -> 66, flat stacking 20 -> 24 of 36, flat "next to" and "to the left" 62 -> 52 of 72. On the same layouts (flat
+"next to" and "to the left", seeds 21, 23 and 29) flat is 51 -> 49 of 72: in the table above part of the flat loss comes
+from different layouts (declined stacks draw new ones). Ball-on-box layouts it would do: 4 -> 9 of 80. The built-in arm
+(its ceiling rises 2 to 3 cm too): 94, 92 and 93 % on its usual checks; the scripted session gives the same messages and
+positions, its recorded moves differ.

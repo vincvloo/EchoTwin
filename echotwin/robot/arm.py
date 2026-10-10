@@ -477,6 +477,34 @@ class Workspace:
                     if self.oks[k, i, j]:
                         q = q2
         self.ok = self.oks.any(axis=0)                        # reachable with some tilt
+        # the ceiling of each column: the highest row reached, except pointing straight down, where it is found between
+        # that row and the next (rows are 4 cm apart, and a row can be missed where the solver did not find the pose).
+        # Not for a lean: hovering leant out over a thing knocks it, so the arm leans only where the grid says it must.
+        self.tops = np.array([[float(self.HEIGHTS[np.nonzero(col)[0].max()]) if col.any() else 0.0 for col in o] for o in self.oks])
+        for i, r in enumerate(self.RADII):
+            if not self.oks[0, i].any():
+                continue
+            lo = self.tops[0, i]
+            hi = float(self.HEIGHTS[self.HEIGHTS > lo][0]) if (self.HEIGHTS > lo).any() else lo
+            for _ in range(5):                                # to 4 cm / 32
+                if hi - lo < 1e-4:
+                    break
+                mid = 0.5 * (lo + hi)
+                _, ep, er = ik.solve(ik.base + np.array([0.0, r, mid]), 0.0, ik.q_down, iters=200)
+                lo, hi = (mid, hi) if ep < 2e-3 and er < 0.08 else (lo, mid)
+            self.tops[0, i] = lo
+        # one lean per distance from the base, from the table to the ceiling: going down to a thing or up from it the
+        # lean does not change, so the open jaws do not swing over it. Straight down where that reaches about as high
+        # as leaning; else the smallest lean that reaches the table and that height. None: no lean reaches the table.
+        self.column_tilt: list = []
+        for i in range(len(self.RADII)):
+            top = float(self.tops[:, i].max())
+            pick = None
+            for k, tilt in enumerate(self.tilts):
+                if self.oks[k, i, :2].any() and self.tops[k, i] >= top - 0.01:
+                    pick = tilt
+                    break
+            self.column_tilt.append(pick)
         low = self.ok[:, 1]                                   # table height
         if not low.any():
             raise ArmError("The arm cannot reach the table top with its tool pointing down.")
@@ -492,15 +520,18 @@ class Workspace:
         return cls._cache[key]
 
     def z_max(self, r: float) -> float:
+        """The highest the tool reaches at this distance from the base, pointing straight down or leaning out."""
         i = int(np.clip(np.searchsorted(self.RADII, r), 0, len(self.RADII) - 1))
-        col = np.nonzero(self.ok[i])[0]
-        return float(self.HEIGHTS[col.max()]) if len(col) else 0.0
+        return float(self.tops[:, i].max())
 
     def tilt_for(self, rel_xy, z: float) -> float:
-        """The smallest tilt that reaches this spot (relative to the base) at this height; the largest when none does."""
+        """How far to lean out at this spot (relative to the base): the one lean of its distance from the base
+        (column_tilt); where there is none, the smallest that reaches this height, the largest when none does."""
         if len(self.tilts) == 1:
             return self.tilts[0]
         i = int(np.clip(np.searchsorted(self.RADII, float(np.hypot(*rel_xy))), 0, len(self.RADII) - 1))
+        if self.column_tilt[i] is not None:
+            return self.column_tilt[i]
         j = int(np.clip(np.searchsorted(self.HEIGHTS, z), 0, len(self.HEIGHTS) - 1))
         for k, tilt in enumerate(self.tilts):
             if self.oks[k, i, j]:
