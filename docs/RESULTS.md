@@ -526,3 +526,23 @@ Measured on the varied objects (30 per cell, same layouts): SO-ARM100 66 -> 68 o
 its classic table 98 -> 97 of 144 (one box). The built-in arm reaches high enough to never need it: identical.
 Tried and left out: sliding out sideways after letting go (the fixed jaw dragged stacked things off), letting tall
 things go lower (the built-in arm's cylinders tipped), and the side approach when stacking (stacking got worse).
+
+## Tipped over means it now lies on another side (2026-10)
+
+Most of the SO-ARM100's remaining "tips over" on varied objects were eggs, and two things were wrong with the measuring,
+not the robot: the varied set stood eggs on their tip (a real egg rests on its side, and in the simulation any touch
+toppled it), and "tips over" was a lean of the up axis of more than 25 degrees, so an egg or a bottle lying on its side
+that rolled a little counted as tipped. Now:
+
+- `World.rests_otherwise`: tipped over means it now rests on another side, its height above the table changed by more than
+  10 % (and it leans more than 25 degrees). A ball, an egg rolling on its side or a cube on another face has not tipped;
+  a glass on its side has. This replaces the ball special case (`has_up` stays as a geometry measure).
+- The varied set lays eggs on their side, and its mesh "egg" (which was never drawn: the name was taken twice) is now a
+  "dome", a rounded thing on a flat foot.
+
+With these (the same robot code), the SO-ARM100 does 72 of 90 varied objects at seeds 21 and 33 (68 and 64 before the
+correction); the built-in arm's classic table stays at 141 of 144. What is left: missed grips ("lands", 5 to 10 of 90)
+and things sliding off when stacked (5 of 30); glasses are still its weakest kind.
+
+Tried and left out: turning in place slowly while holding something when the lean changes (the varied set 72 -> 73 and
+72 -> 72, the classic table 97 -> 95).

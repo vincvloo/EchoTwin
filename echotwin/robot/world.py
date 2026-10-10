@@ -22,6 +22,7 @@ JOINT_SPEED = 2.5           # rad/s, how fast the servos may move their setpoint
 Z_MIN = 0.004               # lowest tool height above the table
 BASE_INSET = 0.07           # the arm's base stands this far in from the front edge of the table
 REST_RISE = 0.14            # resting tool height
+RESTS_OTHERWISE = 0.10      # its height above the table changed this much: it lies on another side (rests_otherwise)
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
 JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_fits)
 ARM_SIZE_MAX = 4.0          # the biggest arm size worth suggesting (sim.ARM_SIZE_RANGE goes to the same)
@@ -271,6 +272,14 @@ class World:
         """Does it matter which way up it lies? Not for a ball: its surface is about as far from its centre everywhere
         (measured on the shape the twin built, features/geometry.py)."""
         return self.shapes[name].has_up
+
+    def rests_otherwise(self, name: str, d=None) -> bool:
+        """Does it now rest on another side than it was put down on: its height above the table changed by more than
+        RESTS_OTHERWISE? A ball, an egg rolling on its side or a cube on another face looks the same; a glass on its
+        side does not."""
+        z0 = self.shapes[name].points[:, 2]
+        z = self.shapes[name].placed(self.rot(name, d))[:, 2]
+        return abs(float(np.ptp(z) - np.ptp(z0))) > RESTS_OTHERWISE * float(np.ptp(z0))
 
     def rot(self, name: str, d=None) -> np.ndarray:
         """How the object is turned right now (3x3)."""
