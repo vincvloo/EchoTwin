@@ -32,11 +32,12 @@ def make_task(world: World, plan: dict, heard: str) -> dict:
     pr = world.layout.props[i]
     goal = MT.goal_xy(world, plan)
     o = world.obj_pos(me)
-    shape = pr.get("shape", "box")
-    task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
+    shape = pr.get("shape", "box")                      # how the twin draws it, kept with the demo; the robot reads `m`
+    m = M.measure(world, me)
+    task = {"kind": "prop", "plan": plan, "object": me, "target": M.CLASS_LABEL[M.size_class(m)], "shape": shape,
             "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
             "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
-            "h": float(world.half(me)), "tallest": float(world.tallest()), "m": M.measure(world, me),
+            "h": float(world.half(me)), "tallest": float(world.tallest()), "m": m,
             "start": [float(o[0]), float(o[1])]}
     if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
         task["stack"] = True
