@@ -490,3 +490,26 @@ boxes 64 -> 66, flat stacking 20 -> 24 of 36, flat "next to" and "to the left" 6
 from different layouts (declined stacks draw new ones). Ball-on-box layouts it would do: 4 -> 9 of 80. The built-in arm
 (its ceiling rises 2 to 3 cm too): 94, 92 and 93 % on its usual checks; the scripted session gives the same messages and
 positions, its recorded moves differ.
+
+## Geometry, not labels: measured on varied objects (2026-10)
+
+The robot now reads each object's built geometry (`features/geometry.py`) instead of its shape label, scans build any
+rounded or tapered thing from its outline, and the single jaw is chosen at grip height (see docs/ARMS.md). Measured with
+`skillcheck` at seed 21, the same layouts before (main, with this skillcheck) and after: 12 trials per classic cell,
+30 per varied cell (`--shapes varied`: boxes of any proportions, flat things, cylinders, balls, eggs and meshes revolved
+from silhouettes, at any rotation).
+
+| | before | after |
+|---|---|---|
+| built-in arm, classic table | 141 / 144 | 141 / 144 (every cell the same) |
+| built-in arm, varied objects | 83 / 90 | 83 / 90 (every cell the same) |
+| SO-ARM100, classic table | 96 / 144 | 98 / 144 |
+| SO-ARM100, varied objects | 57 / 90 | 66 / 90 |
+
+On the SO-ARM100's varied objects "tips over" fell from 21 to 11. Per kind after: balls 12 of 12, eggs 14 of 19, flat
+things 15 of 19, bottles 6 of 8; tapered glasses (0 of 2) and cups (1 of 4) are its weakest. The scripted session gives
+the same messages and positions; its recorded moves differ.
+
+Two changes were tried and taken out because these checks showed they hurt: finding the leaning ceilings between the
+grid's rows (the arm worked at the very edge of its leaning reach and thrashed), and a rule against the hand hanging over
+the thing when leaning (it chose sides the arm could not execute).

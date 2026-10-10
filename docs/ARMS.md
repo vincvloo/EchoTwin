@@ -29,8 +29,8 @@ python -m echotwin.robot.arm --check so_arm100         # loads it, prints its re
   has an up (a ball does not), its mass from its volume, and its top outline for how deep the hand can go over it. The
   shape label (flat, box, cylinder, round) only says how the twin draws a thing.
 - A single jaw: which way round it goes is asked of the arm where the tool will stand, at grip height: the wrist must
-  line up, the arm must hit neither itself nor the table, and where it leans out its hand must not hang over the thing.
-  A round outline is tried from 4 directions. A mobile base drives to a spot where this works.
+  line up, the tool must be able to come down there from above the thing's top, and the arm must hit neither itself nor
+  the table. A round outline is tried from 4 directions. A mobile base drives to a spot where this works.
 
 ## Describe your own arm
 

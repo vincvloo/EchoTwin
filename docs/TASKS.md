@@ -50,9 +50,10 @@ In this order. Each step is only meaningful once the one before it is solid.
 - [x] Scans build any standing thing from its outline when the outline is rounded or tapered, whatever it is called.
 - [x] Demos grouped by measured size class, not by shape label.
 - [x] The single jaw's gap scales with the arm (or the arm's own `fixed_gap`); the stacking clearance with the thing.
-- [x] Reach map: every ceiling found between the grid's rows, a stuck cell tried afresh, one lean per distance.
-- [x] Single jaw: chosen at grip height, against the table and itself, never leaning over the thing; round outlines
+- [x] Single jaw: chosen at grip height, from above the thing's top, against the table and itself; round outlines
       tried from 4 directions.
+- [ ] Reach map when leaning: finding those ceilings between the rows put the arm at the edge of its leaning reach, where
+      it thrashed and knocked things (measured, reverted). Needs a safety margin before it is tried again.
 - [x] Mobile base: stands where the grip and the stacking carry work.
 - [x] Stacking: says how much bigger an arm would need to be.
 - [x] skillcheck: a varied row (everyday objects, scanned-style meshes), per-cell draws, `--jobs`.
