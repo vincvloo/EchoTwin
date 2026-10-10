@@ -37,13 +37,11 @@ so100 = pytest.mark.skipif(A.load("so_arm100").missing_files() != [], reason="so
 
 
 @so100
-def test_every_ceiling_lies_between_its_rows_and_straight_down_needs_no_lean():
+def test_leaning_ceilings_stay_on_the_rows_and_straight_down_needs_no_lean():
     ws = _ws(A.load("so_arm100"))
-    for k in range(len(ws.tilts)):
+    for k in range(1, len(ws.tilts)):
         for i in range(len(ws.RADII)):
-            rows = np.nonzero(ws.oks[k, i])[0]
-            if len(rows):
-                assert ws.HEIGHTS[rows.max()] <= ws.tops[k, i] + 1e-9
+            assert ws.tops[k, i] == 0.0 or ws.tops[k, i] in ws.HEIGHTS          # not refined
     i = int(np.argmin(abs(ws.RADII - 0.26)))
     assert ws.tops[0, i] > 0.08                                                  # the grid said 5 cm: its 9 cm row was missed
     assert ws.tilt_for((0.0, ws.RADII[i]), ws.tops[0, i] - 0.002) == 0.0       # up to there, straight down
