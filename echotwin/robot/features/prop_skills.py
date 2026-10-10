@@ -99,7 +99,8 @@ def outcome(world: World, task: dict, before: dict, d=None, hs=None) -> dict:
 
 # ---------------- the plan as waypoints ----------------
 def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
-    """The move as 8 steps. `pos`: where the object is seen to be (x, y), instead of where the robot believes it is."""
+    """The move as 8 steps (9 when the hand comes in from the side, see _side_way). `pos`: where the object is seen to be
+    (x, y), instead of where the robot believes it is."""
     me = task["object"]
     o = world.obj_pos(me, d)
     if pos is not None:
@@ -125,11 +126,53 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
         grasp_z = float(max(min(grasp_z, carry - world.stack_clear(me) - top + bottom), bottom + 0.004, 0.004))
         hang = world.stack_hang(me, grasp_z - bottom)
         release_z = float(min(top + max(h, hang) + skill["drop"] + 0.006, carry))
-    steps = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
-             ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
-             ("move", [gx, gy, carry])]
+    # a thing nearly as tall as the arm reaches there: the open jaws, hanging below the tool, would sweep its top on the
+    # way down. Come in from the side instead, at the height of the grip. (Going away after letting go, the open jaws
+    # rise beside it: sliding out sideways dragged it with the fixed jaw.)
+    side_in = None if task.get("stack") else _side_way(world, me, (ox, oy), carry, float(o[2] + h), grasp_z, d)
+    if side_in:
+        pick = [("move", [*side_in, carry]), ("move", [*side_in, grasp_z]), ("move", [ox, oy, grasp_z])]
+    else:
+        pick = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z])]
+    steps = [*pick, ("grip", 1.0), ("move", [ox, oy, carry]),
+             ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0), ("move", [gx, gy, carry])]
     on = task["ref"] if task.get("stack") else None
     return with_drives(world, steps, (ox, oy), (gx, gy), me, on) if getattr(world, "mobile", False) else steps
+
+
+SIDE_MARGIN = 0.01        # m: the jaws' lowest point passes this far above a thing's top, else the hand comes in from the side
+
+
+def _side_way(world: World, me: str, at, carry: float, top: float, low: float, d=None):
+    """Where the tool waits beside a spot to come in sideways at height `low`, or None when it can come
+    straight down from above: its hover there (the carry height, or the arm's ceiling) leaves the jaws above `top`.
+    Sideways is along the jaws' plane (across the line they close along), so the open jaws pass on either side; of the
+    two directions, a reachable one clear of the other things, where the arm leans as much as at the spot itself, then
+    nearer the hand."""
+    if not hasattr(world, "jaw_drop"):
+        return None
+    at = np.asarray(at, float)[:2]
+    hover = min(carry, world.ceiling(at) + 0.01)
+    if hover - world.jaw_drop() >= top + SIDE_MARGIN or low >= top:
+        return None
+    y = world.grasp_yaw(me, d)
+    across = np.array([-np.sin(y), np.cos(y)])
+    back = world.radius(me) + 0.03
+    hand = np.asarray(world.hand_pos(d), float)[:2]
+    ways = sorted((at + s * back * across for s in (1, -1)), key=lambda p: float(np.linalg.norm(p - hand)))
+    lean = _lean(world, at, low)
+    others = [n for n in world.things() if n != me]
+    clear = lambda p: all(np.hypot(*(world.obj_pos(n, d)[:2] - p)) > world.radius(n) + 0.03 for n in others)
+    ok = [p for p in ways if world.reachable(p, low) and clear(p)]         # not into another thing on the table
+    ok.sort(key=lambda p: _lean(world, p, low) != lean)              # the same lean first: it does not swing in the slide
+    return [float(ok[0][0]), float(ok[0][1])] if ok else None
+
+
+def _lean(world: World, xy, z: float) -> float:
+    """How far the arm leans out to get its tool to (xy, z) (0 for an arm that does not lean)."""
+    if len(getattr(world.arm, "tilts", (0.0,))) < 2:
+        return 0.0
+    return float(world.workspace.tilt_for(world._rel(np.asarray(xy, float)[:2], world.hand.base), z))
 
 
 def with_drives(world: World, steps: list, pick, place, me: str, on: str | None = None) -> list:
