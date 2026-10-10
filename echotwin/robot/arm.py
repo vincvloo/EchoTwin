@@ -475,26 +475,29 @@ class Workspace:
             for i, r in enumerate(self.RADII):
                 for j, z in enumerate(self.HEIGHTS):
                     q2, ep, er = ik.solve(ik.base + np.array([0.0, r, z]), 0.0, q, iters=200, tilt=tilt)
+                    if not (ep < 2e-3 and er < 0.08):         # from the last pose it got stuck: try afresh
+                        q2, ep, er = ik.solve(ik.base + np.array([0.0, r, z]), 0.0, ik.q_down, iters=200, tilt=tilt)
                     self.oks[k, i, j] = ep < 2e-3 and er < 0.08
                     if self.oks[k, i, j]:
                         q = q2
         self.ok = self.oks.any(axis=0)                        # reachable with some tilt
-        # the ceiling of each column: the highest row reached, except pointing straight down, where it is found between
-        # that row and the next (rows are 4 cm apart, and a row can be missed where the solver did not find the pose).
-        # Not for a lean: hovering leant out over a thing knocks it, so the arm leans only where the grid says it must.
+        # the ceiling of each column and lean, found between the highest row reached and the next (rows are 4 cm apart,
+        # and a row can be missed where the solver did not find the pose). The lean of a column does not change on the
+        # way down or up (column_tilt), so a higher leaning ceiling does not make the arm lean over the thing below.
         self.tops = np.array([[float(self.HEIGHTS[np.nonzero(col)[0].max()]) if col.any() else 0.0 for col in o] for o in self.oks])
-        for i, r in enumerate(self.RADII):
-            if not self.oks[0, i].any():
-                continue
-            lo = self.tops[0, i]
-            hi = float(self.HEIGHTS[self.HEIGHTS > lo][0]) if (self.HEIGHTS > lo).any() else lo
-            for _ in range(5):                                # to 4 cm / 32
-                if hi - lo < 1e-4:
-                    break
-                mid = 0.5 * (lo + hi)
-                _, ep, er = ik.solve(ik.base + np.array([0.0, r, mid]), 0.0, ik.q_down, iters=200)
-                lo, hi = (mid, hi) if ep < 2e-3 and er < 0.08 else (lo, mid)
-            self.tops[0, i] = lo
+        for k, tilt in enumerate(self.tilts):
+            for i, r in enumerate(self.RADII):
+                if not self.oks[k, i].any():
+                    continue
+                lo = self.tops[k, i]
+                hi = float(self.HEIGHTS[self.HEIGHTS > lo][0]) if (self.HEIGHTS > lo).any() else lo
+                for _ in range(5):                            # to 4 cm / 32
+                    if hi - lo < 1e-4:
+                        break
+                    mid = 0.5 * (lo + hi)
+                    _, ep, er = ik.solve(ik.base + np.array([0.0, r, mid]), 0.0, ik.q_down, iters=200, tilt=tilt)
+                    lo, hi = (mid, hi) if ep < 2e-3 and er < 0.08 else (lo, mid)
+                self.tops[k, i] = lo
         # one lean per distance from the base, from the table to the ceiling: going down to a thing or up from it the
         # lean does not change, so the open jaws do not swing over it. Straight down where that reaches about as high
         # as leaning; else the smallest lean that reaches the table and that height. None: no lean reaches the table.
