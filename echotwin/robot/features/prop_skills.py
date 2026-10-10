@@ -118,7 +118,8 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
     if task.get("stack"):  # set it down on top of the other object
         ref = task["ref"]
         top = float(world.obj_pos(ref, d)[2] + world.half(ref))
-        carry = float(min(max(carry, top + h + skill["drop"] + 0.056), carry_max, world.path_ceiling((ox, oy), (gx, gy), me)))
+        carry = float(min(max(carry, top + h + skill["drop"] + 0.056), carry_max,
+                          world.path_ceiling((ox, oy), (gx, gy), me, ref)))
         # what hangs below the tool must clear the other object's top: under a low ceiling, hold it lower down
         bottom = float(o[2] - h)
         grasp_z = float(max(min(grasp_z, carry - world.stack_clear(me) - top + bottom), bottom + 0.004, 0.004))
@@ -127,13 +128,14 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
     steps = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
              ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
              ("move", [gx, gy, carry])]
-    return with_drives(world, steps, (ox, oy), (gx, gy), me) if getattr(world, "mobile", False) else steps
+    on = task["ref"] if task.get("stack") else None
+    return with_drives(world, steps, (ox, oy), (gx, gy), me, on) if getattr(world, "mobile", False) else steps
 
 
-def with_drives(world: World, steps: list, pick, place, me: str) -> list:
-    """A mobile base drives first when the object, or later the place, is out of the arm's reach from where it stands:
-    drive, stop, then the arm moves as on a fixed base."""
-    (_, at_pick), (_, at_place) = world.stands(pick, place, me)
+def with_drives(world: World, steps: list, pick, place, me: str, on: str | None = None) -> list:
+    """A mobile base drives first when it cannot pick the object from where it stands, and again when it cannot set it
+    down (on top of `on`) from there: drive, stop, then the arm moves as on a fixed base (World.stands)."""
+    (_, at_pick), (_, at_place) = world.stands(pick, place, me, on)
     out = list(steps)
     if at_pick is not None:
         out.insert(0, ("drive", at_pick.tolist()))

@@ -23,7 +23,7 @@ Z_MIN = 0.004               # lowest tool height above the table
 BASE_INSET = 0.07           # the arm's base stands this far in from the front edge of the table
 REST_RISE = 0.14            # resting tool height
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
-JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_side)
+JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_fits)
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
                             # (the arm described at its own size; "fixed_gap" in its gripper overrides it, see fixed_gap)
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
@@ -144,27 +144,55 @@ class World:
         c, s = np.cos(pose[2]), np.sin(pose[2])
         return np.array([c * rel[0] - s * rel[1], s * rel[0] + c * rel[1]]) + pose[:2]
 
-    def standoff(self, xy, ignore: str | None = None, near=None) -> np.ndarray | None:
+    def standoff(self, xy, ignore: str | None = None, near=None, check=None) -> np.ndarray | None:
         """Where a mobile base should stand to work on `xy`: facing it, at the middle of the arm's reach, its footprint
         clear of the things on the table and the furniture (`ignore`: the object it works on). The spot nearest to
-        `near` (default: where the base is) comes first. None when there is no free spot."""
+        `near` (default: where the base is) comes first. `check(pose)`: what must work from there (the grip, the carry);
+        nearer and further spots are tried for it, and when none passes, the first free spot is given. None when there
+        is no free spot."""
         xy = np.asarray(xy, float)[:2]
         near = self.hand.base[:2] if near is None else np.asarray(near, float)[:2]
         body = 0.5 * float(np.hypot(*self.robot.footprint)) + 0.02
         front = 0.5 * self.robot.footprint[1] + 0.05           # the arm cannot work under its own base
-        r = float(np.clip(0.5 * (self.workspace.r_min + self.workspace.r_max), front, self.workspace.r_max - 0.02))
+        lo, hi = max(self.workspace.r_min, front), self.workspace.r_max - 0.02
+        mid = float(np.clip(0.5 * (self.workspace.r_min + self.workspace.r_max), front, hi))
+        radii = [mid] + ([r for r in np.linspace(lo, hi, 5) if abs(r - mid) > 0.01] if check is not None else [])
         home = float(np.arctan2(*(near - xy)[::-1]))
-        for k in sorted(range(24), key=lambda k: abs(np.angle(np.exp(1j * (2 * np.pi * k / 24 - home))))):
-            a = 2 * np.pi * k / 24
-            spot = xy + r * np.array([np.cos(a), np.sin(a)])
-            clear = all(np.hypot(*(self.obj_pos(n)[:2] - spot)) > body + self.radius(n)
-                        for n in self.things() if n != ignore)
-            clear = clear and all(np.hypot(*(np.asarray(o["pos"], float) - spot)) > body + max(o["size"][:2])
-                                  for o in self.layout.obstacles)
-            if clear:
+        first = None
+        for r in radii:
+            for k in sorted(range(24), key=lambda k: abs(np.angle(np.exp(1j * (2 * np.pi * k / 24 - home))))):
+                a = 2 * np.pi * k / 24
+                spot = xy + r * np.array([np.cos(a), np.sin(a)])
+                clear = all(np.hypot(*(self.obj_pos(n)[:2] - spot)) > body + self.radius(n)
+                            for n in self.things() if n != ignore)
+                clear = clear and all(np.hypot(*(np.asarray(o["pos"], float) - spot)) > body + max(o["size"][:2])
+                                      for o in self.layout.obstacles)
+                if not clear:
+                    continue
                 d = xy - spot
-                return np.array([spot[0], spot[1], float(np.arctan2(-d[0], d[1]))])
-        return None
+                pose = np.array([spot[0], spot[1], float(np.arctan2(-d[0], d[1]))])
+                if check is None or check(pose):
+                    return pose
+                first = pose if first is None else first
+        return first
+
+    def grips_from(self, name: str, pose) -> bool:
+        """Could the arm, its base standing at `pose`, reach `name` and get its jaws around it?"""
+        if not self.reachable_from(pose, self.obj_pos(name)[:2]):
+            return False
+        if self.arm.gripper["mode"] != "single":
+            return True
+        tries = 4 if self.shapes[name].grip(self.rot(name))[1] is None else 1      # a round outline: any direction
+        return any(self._jaw_fits(name, self._jaw_free_yaw(name) + k * np.pi / 4, pose)[0][2] for k in range(tries))
+
+    def pick_pose(self, name: str) -> np.ndarray:
+        """Where the base stands to pick `name` up: where it is when it can grip it from there, else (a mobile base) a
+        spot beside it from which it can."""
+        pose = self.hand.base.copy()
+        if not self.mobile or self.grips_from(name, pose):
+            return pose
+        at = self.standoff(self.obj_pos(name)[:2], ignore=name, check=lambda p: self.grips_from(name, p))
+        return pose if at is None else at
 
     def _overlap(self, xy, ignore: str | None = None) -> float:
         """How far a base standing at `xy` cuts into the things and the furniture (0: it touches nothing)."""
@@ -273,23 +301,37 @@ class World:
         pose = self.hand.base if pose is None else np.asarray(pose, float)
         return self.workspace.z_max(float(np.hypot(*self._rel(xy, pose)))) - 0.01
 
-    def stands(self, pick, place, ignore: str | None = None) -> tuple:
+    def stands(self, pick, place, ignore: str | None = None, on: str | None = None) -> tuple:
         """Where the base stands to pick up at `pick` and to set down at `place`: ((pose, drove there), (pose, drove there)),
-        the drive spot None when it does not move. A fixed base always stands where it is."""
+        the drive spot None when it does not move. A fixed base always stands where it is. A mobile base picks `ignore`
+        (the thing it carries) from where it can get its jaws around it, and sets it on `on` from where it can lift it
+        high enough over it."""
         pose = self.hand.base.copy()
         at_pick = at_place = None
-        if self.mobile and not self.reachable_from(pose, pick):
-            at_pick = self.standoff(pick, ignore=ignore)
+        if self.mobile:
+            if ignore is not None:
+                spot = self.pick_pose(ignore)
+                at_pick = None if np.allclose(spot, pose) else spot
+            elif not self.reachable_from(pose, pick):
+                at_pick = self.standoff(pick)
             pose = pose if at_pick is None else at_pick
         first = pose
-        if self.mobile and not self.reachable_from(pose, place):
-            at_place = self.standoff(place, ignore=ignore, near=pose[:2])
+
+        def sets_down(p) -> bool:
+            if not self.reachable_from(p, place):
+                return False
+            if on is None or ignore is None:
+                return True
+            top = float(self.obj_pos(on)[2] + self.half(on))
+            return self.ceiling(place, p) - self.stack_hang(ignore) - top >= self.stack_clear(ignore)
+        if self.mobile and not sets_down(pose):
+            at_place = self.standoff(place, ignore=ignore, near=pose[:2], check=sets_down)
             pose = pose if at_place is None else at_place
         return (first, at_pick), (pose, at_place)
 
-    def path_ceiling(self, pick, place, ignore: str | None = None) -> float:
+    def path_ceiling(self, pick, place, ignore: str | None = None, on: str | None = None) -> float:
         """The lowest ceiling the tool meets while it carries something from `pick` to `place` (see ceiling())."""
-        (p0, _), (p1, at_place) = self.stands(pick, place, ignore)
+        (p0, _), (p1, at_place) = self.stands(pick, place, ignore, on)
         pick, place = np.asarray(pick, float)[:2], np.asarray(place, float)[:2]
         if at_place is not None:                       # it drives on the way: lifts over the pick, lowers over the place
             return min(self.ceiling(pick, p0), self.ceiling(place, p1))
@@ -376,20 +418,13 @@ class World:
                       key=lambda c: min(abs(np.angle(np.exp(1j * (c - r)))) for r in refs))
         if self.arm.gripper["mode"] != "single":
             return float(yaw)
+        pose = self.pick_pose(name) if self.mobile else None      # a mobile base: from where it will stand to pick it
         if across is None:                              # a round outline: any direction grips it, so try a few
             for k in range(4):
-                fits = self._jaw_fits(name, float(yaw + k * np.pi / 4))
+                fits = self._jaw_fits(name, float(yaw + k * np.pi / 4), pose)
                 if fits[0][2]:
                     return fits[0][1]
-        return self._jaw_side(name, float(yaw))
-
-    def _jaw_side(self, name: str, yaw: float) -> float:
-        """A single moving jaw: which way round the arm can hold its jaws over this object. Closing along yaw or along
-        yaw + pi is the same line, but it decides on which side the fixed jaw stands, and the plan puts the fixed jaw beside
-        the thing (grasp_offset). The wrist cannot always turn half a turn, near the base the arm cannot come down on the
-        side facing it, and folded up the open jaw can hit the arm: ask the arm both ways round, where the tool will stand,
-        and keep the way asked when it works, else the one it does best."""
-        return self._jaw_fits(name, yaw)[0][1]
+        return self._jaw_fits(name, float(yaw), pose)[0][1]
 
     def _jaw_fits(self, name: str, yaw: float, pose=None) -> list:
         """[(score, yaw, works)] for both ways round, the one to use first, for a base standing at `pose` (default where it
@@ -451,10 +486,6 @@ class World:
                 break
         s.qpos[jaws] = was
         return hit
-
-    def _hits_itself(self, q) -> bool:
-        """Would the arm at joint values q, jaws open, touch itself (or the scenery)? See _collides."""
-        return self._collides(q)
 
     def _gripper_bodies(self) -> set:
         """The bodies the pads are on (the jaws)."""
@@ -530,6 +561,8 @@ class World:
                 return "there is no free spot for me to stand next to it"
             if goal_xy is not None and self.standoff(goal_xy, ignore=name) is None:
                 return "there is no free spot for me to stand next to that place"
+            if not self.grips_from(name, self.pick_pose(name)):
+                return "I can't get my jaws around it from anywhere I can stand"
         else:
             if not self.reachable(self.obj_pos(name)[:2]):
                 return "it is out of my reach"
@@ -540,7 +573,7 @@ class World:
         if on is not None and goal_xy is not None:
             off = self.grasp_offset(name)[:2]
             top = float(self.obj_pos(on)[2] + self.half(on))
-            ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name)
+            ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name, on)
             if ceiling - self.stack_hang(name) - top < self.stack_clear(name):
                 return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here"
         return ""

@@ -49,9 +49,9 @@ def test_it_declines_a_flat_thing_right_in_front_of_its_base():
 
 def test_the_open_jaw_hitting_the_arm_is_seen():
     w = _world("flat", (-0.04, -0.11))
-    assert not w._hits_itself(w.ik.q_down)                  # pointing down in the middle of its reach: clear
+    assert not w._collides(w.ik.q_down)                  # pointing down in the middle of its reach: clear
     folded = w.ik.solve(np.array([-0.04, -0.072, 0.01]), np.pi / 2, w.ik.q_down, iters=150)[0]
-    assert w._hits_itself(folded)
+    assert w._collides(folded)
 
 
 def test_while_held_the_offset_follows_the_jaws_not_a_new_choice():
