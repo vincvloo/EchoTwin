@@ -25,8 +25,10 @@ REST_RISE = 0.14            # resting tool height
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
 JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_side)
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
+                            # (the arm described at its own size; "fixed_gap" in its gripper overrides it, see fixed_gap)
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
-STACK_CLEAR = 0.015         # m: a carried object's bottom passes this far above the top it is to be set on
+STACK_CLEAR = 0.015         # m: a carried object's bottom passes at least this far above the top it is to be set on
+STACK_CLEAR_SHARE = 0.15    # and at least this share of its own height (a tall thing swings more: stack_clear)
 MIN_THICKNESS = 0.015       # thinner than this cannot be pinched from a table (measured, docs/RESULTS.md)
 
 
@@ -314,7 +316,7 @@ class World:
         tool = s.site_xpos[self.site].copy()
         centre = tool
         if self.arm.gripper["mode"] == "single":           # the object stands beside the fixed jaw (grasp_offset); here the jaws close along x
-            centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP), 0, 0])
+            centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + self.fixed_gap), 0, 0])
         robot = self._robot_bodies()
         geomid = np.zeros(1, np.int32)
         best = 1.0
@@ -393,7 +395,7 @@ class World:
             if len(cache) > 256:
                 cache.clear()
             self.ik.set_base(self.hand.base)
-            side = float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
+            side = float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + self.fixed_gap)
             fits = []
             for k, y in enumerate((yaw, yaw + np.pi)):
                 along = np.array([np.cos(y), np.sin(y), 0.0])
@@ -502,7 +504,7 @@ class World:
             off = self.grasp_offset(name)[:2]
             top = float(self.obj_pos(on)[2] + self.half(on))
             ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name)
-            if ceiling - self.stack_hang(name) - top < STACK_CLEAR:
+            if ceiling - self.stack_hang(name) - top < self.stack_clear(name):
                 return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here"
         return ""
 
@@ -514,7 +516,18 @@ class World:
             return np.zeros(3)
         y = self.grasp_yaw(name) if yaw is None else float(yaw)
         side = float(self.arm.gripper.get("fixed_side", 1))
-        return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
+        return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + self.fixed_gap)
+
+    @property
+    def fixed_gap(self) -> float:
+        """A single jaw: how far beside the thing the fixed jaw comes down. The arm's own ("fixed_gap" in its gripper,
+        resized with it), else FIXED_JAW_GAP times its size: a bigger arm is less precise in millimetres."""
+        g = self.arm.gripper
+        return float(g["fixed_gap"]) if "fixed_gap" in g else FIXED_JAW_GAP * float(self.arm.scale)
+
+    def stack_clear(self, name: str) -> float:
+        """How far above the other top the bottom of `name` passes when it is carried there to be stacked."""
+        return max(STACK_CLEAR, STACK_CLEAR_SHARE * 2 * self.half(name))
 
     # ---------- queries ----------
     def hand_pos(self, d=None) -> np.ndarray:

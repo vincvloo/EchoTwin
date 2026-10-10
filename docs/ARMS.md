@@ -36,7 +36,7 @@ actuators, and these fields:
 | `base_body` | The root body of the arm (it is attached to the table at the front edge) |
 | `mount_yaw_deg` | Turn the arm about the vertical axis so it faces into the table (try 0 or 180) |
 | `joints`, `actuators` | Exactly five each, in order: base rotation, three bending joints, wrist roll |
-| `gripper` | `mode` `parallel` (two sliding pads) or `single` (one moving jaw, set `fixed_side` to 1 or -1), the gripper `actuators`, and their `open` and `closed` values |
+| `gripper` | `mode` `parallel` (two sliding pads) or `single` (one moving jaw, set `fixed_side` to 1 or -1), the gripper `actuators`, and their `open` and `closed` values. A single jaw may set `fixed_gap` (m): how far beside the thing its fixed jaw comes down (default 8 mm times the arm's size) |
 | `tool` | `body` and `pos` (the point between the pads, in that body's frame), `point_axis` (the tool's axis that must point down), `close_axis` (the direction the jaws close along) |
 | `pads` | Parts of the pad geom names (used to see what is held) |
 | `home` | Five joint values to start from |

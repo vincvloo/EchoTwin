@@ -14,7 +14,7 @@ import os
 
 import numpy as np
 
-from ..world import CTRL_DT, STACK_CLEAR, VMAX, World
+from ..world import CTRL_DT, VMAX, World
 from . import measure as M
 from . import move_things as MT
 
@@ -121,7 +121,7 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
         carry = float(min(max(carry, top + h + skill["drop"] + 0.056), carry_max, world.path_ceiling((ox, oy), (gx, gy), me)))
         # what hangs below the tool must clear the other object's top: under a low ceiling, hold it lower down
         bottom = float(o[2] - h)
-        grasp_z = float(max(min(grasp_z, carry - STACK_CLEAR - top + bottom), bottom + 0.004, 0.004))
+        grasp_z = float(max(min(grasp_z, carry - world.stack_clear(me) - top + bottom), bottom + 0.004, 0.004))
         hang = world.stack_hang(me, grasp_z - bottom)
         release_z = float(min(top + max(h, hang) + skill["drop"] + 0.006, carry))
     steps = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
