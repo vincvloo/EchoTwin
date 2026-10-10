@@ -116,3 +116,16 @@ def test_a_single_jaws_gap_grows_with_the_arm():
                       "gripper": {**so.gripper, "fixed_gap": 0.005}}, A.ARMS_DIR / "so_arm100.json")
     assert World(Layout(), custom).fixed_gap == pytest.approx(0.005)
     assert World(Layout(), custom.sized(custom.scale * 2)).fixed_gap == pytest.approx(0.010)
+
+
+@pytest.mark.skipif(A.load("so_arm100").missing_files() != [], reason="so_arm100 is not downloaded")
+def test_it_says_how_much_bigger_an_arm_would_have_to_be_to_stack():
+    w = _world("round", (-0.134, -0.022), (0.275, -0.15), arm=A.load("so_arm100"))
+    k = w.size_to_stack("prop_0", "prop_1")
+    assert k is not None and k > 1.0
+    assert f"{k:.1f} times my size" in w.refusal("prop_0", _stack(w)["goal"], on="prop_1")
+    big = _world("round", (-0.134, -0.022), (0.275, -0.15), arm=A.load("so_arm100").sized(k))
+    off = big.grasp_offset("prop_0")[:2]
+    ceiling = big.path_ceiling(big.obj_pos("prop_0")[:2] + off, np.asarray(_stack(big)["goal"]) + off, "prop_0", "prop_1")
+    top = big.obj_pos("prop_1")[2] + big.half("prop_1")
+    assert ceiling - big.stack_hang("prop_0") - top >= big.stack_clear("prop_0") - 0.005    # high enough at that size

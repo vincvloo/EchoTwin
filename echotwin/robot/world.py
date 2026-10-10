@@ -24,6 +24,7 @@ BASE_INSET = 0.07           # the arm's base stands this far in from the front e
 REST_RISE = 0.14            # resting tool height
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
 JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_fits)
+ARM_SIZE_MAX = 4.0          # the biggest arm size worth suggesting (sim.ARM_SIZE_RANGE goes to the same)
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
                             # (the arm described at its own size; "fixed_gap" in its gripper overrides it, see fixed_gap)
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
@@ -551,6 +552,26 @@ class World:
                 "grasp": round(grasp, 2), "reach": round(reach, 2), "most": round(most, 2),
                 "needed": None if why else round(k, 2), "why": why}
 
+    def size_to_stack(self, name: str, on: str) -> float | None:
+        """How big this arm would have to be (relative to the arm as described, like size_needed) to carry `name` high
+        enough over `on` to set it on top: its ceiling grows with its size, along the whole way there for a fixed base,
+        at the best spot for a mobile one. None when no size up to ARM_SIZE_MAX does."""
+        s = float(self.arm.scale)
+        need = float(self.obj_pos(on)[2] + self.half(on)) + self.stack_hang(name) + self.stack_clear(name)
+        top1 = lambda r1: self.workspace.z_max(r1 * s) / s                # the ceiling of the arm at size 1
+        if self.mobile:
+            best = max(top1(r / s) for r in self.workspace.RADII)
+            k = (need + 0.01) / max(best, 1e-6)
+            return round(float(k), 2) if k <= ARM_SIZE_MAX else None
+        base1 = np.asarray(self.base, float)[:2] - np.array([0.0, BASE_INSET * (s - 1)])
+        a, b = self.obj_pos(name)[:2], self.obj_pos(on)[:2]
+        path = [a + (b - a) * f for f in np.linspace(0.0, 1.0, max(2, int(np.linalg.norm(b - a) / 0.01) + 1))]
+        for k in np.arange(0.75, ARM_SIZE_MAX + 1e-9, 0.05):
+            base = base1 + np.array([0.0, BASE_INSET * (k - 1)])
+            if all(k * top1(float(np.hypot(*(p - base))) / k) - 0.01 >= need for p in path):
+                return round(float(k), 2)
+        return None
+
     def refusal(self, name: str, goal_xy=None, on: str | None = None) -> str:
         """Why the arm cannot move this object (to this spot, or on top of the object `on`), in plain words; empty when it can."""
         ok, why = self.can_grasp(name)
@@ -575,7 +596,9 @@ class World:
             top = float(self.obj_pos(on)[2] + self.half(on))
             ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name, on)
             if ceiling - self.stack_hang(name) - top < self.stack_clear(name):
-                return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here"
+                k = self.size_to_stack(name, on)
+                bigger = f" (an arm {k / float(self.arm.scale):.1f} times my size could)" if k and k > self.arm.scale else ""
+                return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here{bigger}"
         return ""
 
     def grasp_offset(self, name: str, yaw: float | None = None) -> np.ndarray:
