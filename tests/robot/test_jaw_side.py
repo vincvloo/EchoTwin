@@ -49,9 +49,9 @@ def test_it_declines_a_flat_thing_right_in_front_of_its_base():
 
 def test_the_open_jaw_hitting_the_arm_is_seen():
     w = _world("flat", (-0.04, -0.11))
-    assert not w._hits_itself(w.ik.q_down)                  # pointing down in the middle of its reach: clear
+    assert not w._collides(w.ik.q_down)                  # pointing down in the middle of its reach: clear
     folded = w.ik.solve(np.array([-0.04, -0.072, 0.01]), np.pi / 2, w.ik.q_down, iters=150)[0]
-    assert w._hits_itself(folded)
+    assert w._collides(folded)
 
 
 def test_while_held_the_offset_follows_the_jaws_not_a_new_choice():
@@ -71,3 +71,19 @@ def test_a_parallel_gripper_is_not_affected():
     lay.props = [S._prop("mover", "flat", S.SHAPES["flat"], (-0.04, -0.11), 1.0)]
     w = World(lay)
     assert w.grasp_offset("prop_0", 1.0).tolist() == [0.0, 0.0, 0.0] and "jaws around" not in w.refusal("prop_0")
+
+
+def test_a_round_outline_is_gripped_from_another_direction_when_one_fails():
+    w = _world("round", (0.25, 0.0))
+    assert w.refusal("prop_0") == ""
+    assert any(ok for _, _, ok in w._jaw_fits("prop_0", w.grasp_yaw("prop_0")))
+
+
+def test_the_arm_against_the_table_counts_its_jaws_resting_on_it_does_not():
+    w = _world("box", (0.0, -0.05))
+    at = w.obj_pos("prop_0") + w.grasp_offset("prop_0")
+    at[2] = 0.004
+    q = w.ik.solve(at, w.grasp_yaw("prop_0"), w.ik.q_down, iters=150)[0]
+    assert not w._collides(q)                               # gripping low: the jaws sit on the table
+    sunk = w.ik.solve(at - np.array([0.0, 0.0, 0.12]), w.grasp_yaw("prop_0"), w.ik.q_down, iters=200)[0]
+    assert w._collides(sunk)                                # 12 cm into the table: past the jaws, the wrist is in it

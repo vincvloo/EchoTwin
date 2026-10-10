@@ -6,7 +6,7 @@ from echotwin.robot import arm as A
 from echotwin.robot import skillcheck as S
 from echotwin.robot.features import prop_skills as PS
 from echotwin.robot.scene import Layout
-from echotwin.robot.world import STACK_CLEAR, World
+from echotwin.robot.world import World
 
 
 def _world(shape, at, ref_at, size=None, ref_size=S.OTHER, arm=None):
@@ -44,7 +44,7 @@ def test_a_stack_is_carried_under_the_ceiling_and_over_the_other_top():
     grasp_z, carry = moves[1][2], moves[2][2]
     assert carry <= w.path_ceiling(moves[0][:2], moves[3][:2], "prop_0") + 1e-9
     top = w.obj_pos("prop_1")[2] + w.half("prop_1")
-    assert carry - w.stack_hang("prop_0", grasp_z - (w.obj_pos("prop_0")[2] - w.half("prop_0"))) - top >= STACK_CLEAR - 1e-9
+    assert carry - w.stack_hang("prop_0", grasp_z - (w.obj_pos("prop_0")[2] - w.half("prop_0"))) - top >= w.stack_clear("prop_0") - 1e-9
 
 
 def test_other_moves_plan_as_before():
@@ -99,3 +99,33 @@ def test_skillcheck_reports_a_layout_the_arm_declines_as_refused(monkeypatch):
     monkeypatch.setattr(World, "refusal", lambda self, name, goal_xy=None, on=None: "it is out of my reach")
     r = S.trial("box", "next to", np.random.default_rng(0))
     assert not r["ok"] and r["why"] == "refused: it is out of my reach" and S.reason_key(r["why"]) == "refused"
+
+
+def test_the_stacking_clearance_grows_with_the_carried_thing():
+    w = _world("box", (0.0, 0.0), (0.12, 0.06))
+    tall = _world("cylinder", (0.0, 0.0), (0.12, 0.06), size=(0.06, 0.06, 0.16))
+    assert w.stack_clear("prop_0") == pytest.approx(0.015)                     # a 4 cm box: the floor
+    assert tall.stack_clear("prop_0") == pytest.approx(0.15 * 0.16)            # a 16 cm bottle swings more
+
+
+def test_a_single_jaws_gap_grows_with_the_arm():
+    so = A.load("so_arm100")
+    assert World(Layout(), so).fixed_gap == pytest.approx(0.008)
+    assert World(Layout(), so.sized(so.scale * 2)).fixed_gap == pytest.approx(0.016)
+    custom = A.parse({**__import__("json").loads((A.ARMS_DIR / "so_arm100.json").read_text(encoding="utf-8")),
+                      "gripper": {**so.gripper, "fixed_gap": 0.005}}, A.ARMS_DIR / "so_arm100.json")
+    assert World(Layout(), custom).fixed_gap == pytest.approx(0.005)
+    assert World(Layout(), custom.sized(custom.scale * 2)).fixed_gap == pytest.approx(0.010)
+
+
+@pytest.mark.skipif(A.load("so_arm100").missing_files() != [], reason="so_arm100 is not downloaded")
+def test_it_says_how_much_bigger_an_arm_would_have_to_be_to_stack():
+    w = _world("round", (-0.134, -0.022), (0.275, -0.15), arm=A.load("so_arm100"))
+    k = w.size_to_stack("prop_0", "prop_1")
+    assert k is not None and k > 1.0
+    assert f"{k:.1f} times my size" in w.refusal("prop_0", _stack(w)["goal"], on="prop_1")
+    big = _world("round", (-0.134, -0.022), (0.275, -0.15), arm=A.load("so_arm100").sized(k))
+    off = big.grasp_offset("prop_0")[:2]
+    ceiling = big.path_ceiling(big.obj_pos("prop_0")[:2] + off, np.asarray(_stack(big)["goal"]) + off, "prop_0", "prop_1")
+    top = big.obj_pos("prop_1")[2] + big.half("prop_1")
+    assert ceiling - big.stack_hang("prop_0") - top >= big.stack_clear("prop_0") - 0.005    # high enough at that size

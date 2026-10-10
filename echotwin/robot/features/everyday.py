@@ -153,7 +153,8 @@ def marks_image(bgr, objs) -> np.ndarray:
 
 
 SHAPES = ("box", "cylinder", "flat", "round")
-ROUND = ("round", "cylinder")     # shapes that are built from the object's outline (lathe.py)
+ROUND = ("round", "cylinder")     # shapes that are built from the object's outline (lathe.py), whatever the outline
+TAPER = 0.2                       # an outline whose width changes this much up its height is not a box, whatever it is called
 
 NAMING_PROMPT = """The photo shows things lying on a surface (a table, the floor, a shelf, a bed...), with numbered yellow
 boxes around them. For each number, name the object in 1-4 plain words and say its 3D shape:
@@ -307,6 +308,23 @@ def guess_shape(mask_crop: np.ndarray) -> str:
     return "round" if float(mask_crop.mean()) >= ROUND_FILL and corners < ROUND_CORNERS else "box"
 
 
+def built_from_outline(shape: str, mask_crop: np.ndarray) -> bool:
+    """Is the object built from its own outline (lathe.py) rather than as a box? Yes when called round or a cylinder, and
+    also when its outline says so whatever it is called: rounded (guess_shape), or its width changes up its height
+    (a mug, a bottle, a tub). A box seen from the side has straight sides and stays a box."""
+    if shape in ROUND:
+        return True
+    if shape == "flat" or mask_crop is None or not mask_crop.any():
+        return False
+    if guess_shape(mask_crop) == "round":
+        return True
+    prof = lathe.profile(mask_crop)
+    if prof is None:
+        return False
+    body = prof[2:-2] if len(prof) > 6 else prof               # not the foot and the top, which the outline rounds off
+    return float(body.max() - body.min()) > TAPER
+
+
 def is_thin(it: dict) -> bool:
     """A cable or a pen: long and thin in the photo, so it lies on the table and is not a block."""
     if it.get("mask") is None:
@@ -363,12 +381,13 @@ def build(res: dict, out_dir) -> tuple[list[dict], str, np.ndarray]:
             bx, by, bw, bh = it["box"]
             crop = bgr[by:by + bh, bx:bx + bw].copy()
             mk = it["mask"][by:by + bh, bx:bx + bw]
-            edge = 11 if it["shape"] in ROUND else 7        # the mask edge is mostly table; a rounded thing shows its edge more
+            from_outline = built_from_outline(it["shape"], mk)
+            edge = 11 if from_outline else 7               # the mask edge is mostly table; a rounded thing shows its edge more
             inner = cv2.erode(mk.astype(np.uint8), np.ones((edge, edge), np.uint8),
                               borderType=cv2.BORDER_CONSTANT, borderValue=0).astype(bool)   # also at the photo's own edge
             crop[~(inner if inner.any() else mk)] = np.array(it["rgb"][::-1]) * 255
             skin = cube_atlas(it["rgb"], near=crop)
-            if it["shape"] in ROUND:                       # a rounded thing gets the shape of its own outline
+            if from_outline:                               # a rounded or tapered thing gets the shape of its own outline
                 prof = lathe.profile(mk)
                 if prof is not None:
                     v, uv, f = lathe.build(prof, max(w, 0.02), max(d, 0.02), max(h, 0.006))

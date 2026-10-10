@@ -12,7 +12,8 @@ import numpy as np
 
 from . import arm as A
 from . import robots as RB
-from .scene import Layout, build_xml
+from .features import geometry as GE
+from .scene import DENSITY, Layout, build_xml
 
 CTRL_HZ = 20
 CTRL_DT = 1.0 / CTRL_HZ
@@ -22,11 +23,13 @@ Z_MIN = 0.004               # lowest tool height above the table
 BASE_INSET = 0.07           # the arm's base stands this far in from the front edge of the table
 REST_RISE = 0.14            # resting tool height
 TILT_RATE = 1.0             # rad/s, how fast the tool may change how far it leans out (arms with tilts_deg)
-JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_side)
+JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing which way round a single jaw goes (see _jaw_fits)
+ARM_SIZE_MAX = 4.0          # the biggest arm size worth suggesting (sim.ARM_SIZE_RANGE goes to the same)
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
+                            # (the arm described at its own size; "fixed_gap" in its gripper overrides it, see fixed_gap)
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
-STACK_CLEAR = 0.015         # m: a carried object's bottom passes this far above the top it is to be set on
-BALL_ROUNDNESS = 1.15       # a round thing whose sizes are within 15 % of each other is a ball: it has no up (has_up)
+STACK_CLEAR = 0.015         # m: a carried object's bottom passes at least this far above the top it is to be set on
+STACK_CLEAR_SHARE = 0.15    # and at least this share of its own height (a tall thing swings more: stack_clear)
 MIN_THICKNESS = 0.015       # thinner than this cannot be pinched from a table (measured, docs/RESULTS.md)
 
 
@@ -88,15 +91,29 @@ class World:
             self.obj_dadr[n] = m.jnt_dofadr[m.joint(n).id]
             self.obj_body[n] = m.body(n).id
         self._body_to_prop = {b: n for n, b in self.obj_body.items()}
+        # each object's shape as the twin built it (box, cylinder, ellipsoid or scanned mesh): what the robot reads
+        self.shapes = {n: GE.of_body(m, b) for n, b in self.obj_body.items()}
+        reweighed = False
+        for n, b in self.obj_body.items():          # a scanned mesh weighs what its own volume would, not its box's
+            vol = sum(v for g in range(m.ngeom) if int(m.geom_bodyid[g]) == b
+                      for v in [GE.mesh_volume(m, g)] if v is not None)
+            if vol > 0:
+                mass = float(np.clip(vol * DENSITY, 0.02, 0.4))
+                m.body_inertia[b] *= mass / m.body_mass[b]
+                m.body_mass[b] = mass
+                reweighed = True
         for a, v in zip(self.ik.qadr, self.arm.home):
             self.data.qpos[a] = v
         for a, act, v in zip(self.ik.base_qadr, self.base_act, self.hand.base):
             self.data.qpos[a], self.data.ctrl[act] = v, v
+        if reweighed:
+            mujoco.mj_setConst(m, self.data)
         mujoco.mj_forward(m, self.data)
         self.ik.seed_down((0.0, 0.22))
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
         self._palms = {}
         self.__dict__.pop("_robot_ids", None)
+        self.__dict__.pop("_gripper_ids", None)
         self.__dict__.pop("_jaw_cache", None)
         self.go_rest(teleport=True)
 
@@ -128,27 +145,55 @@ class World:
         c, s = np.cos(pose[2]), np.sin(pose[2])
         return np.array([c * rel[0] - s * rel[1], s * rel[0] + c * rel[1]]) + pose[:2]
 
-    def standoff(self, xy, ignore: str | None = None, near=None) -> np.ndarray | None:
+    def standoff(self, xy, ignore: str | None = None, near=None, check=None) -> np.ndarray | None:
         """Where a mobile base should stand to work on `xy`: facing it, at the middle of the arm's reach, its footprint
         clear of the things on the table and the furniture (`ignore`: the object it works on). The spot nearest to
-        `near` (default: where the base is) comes first. None when there is no free spot."""
+        `near` (default: where the base is) comes first; nearer and further spots are tried when the middle has none.
+        `check(pose)`: what must work from there (the grip, the carry); when no spot passes, the first free one is given.
+        None when there is no free spot."""
         xy = np.asarray(xy, float)[:2]
         near = self.hand.base[:2] if near is None else np.asarray(near, float)[:2]
         body = 0.5 * float(np.hypot(*self.robot.footprint)) + 0.02
         front = 0.5 * self.robot.footprint[1] + 0.05           # the arm cannot work under its own base
-        r = float(np.clip(0.5 * (self.workspace.r_min + self.workspace.r_max), front, self.workspace.r_max - 0.02))
+        lo, hi = max(self.workspace.r_min, front), self.workspace.r_max - 0.02
+        mid = float(np.clip(0.5 * (self.workspace.r_min + self.workspace.r_max), front, hi))
+        radii = [mid] + [r for r in np.linspace(lo, hi, 5) if abs(r - mid) > 0.01]   # the middle first, then nearer, further
         home = float(np.arctan2(*(near - xy)[::-1]))
-        for k in sorted(range(24), key=lambda k: abs(np.angle(np.exp(1j * (2 * np.pi * k / 24 - home))))):
-            a = 2 * np.pi * k / 24
-            spot = xy + r * np.array([np.cos(a), np.sin(a)])
-            clear = all(np.hypot(*(self.obj_pos(n)[:2] - spot)) > body + self.radius(n)
-                        for n in self.things() if n != ignore)
-            clear = clear and all(np.hypot(*(np.asarray(o["pos"], float) - spot)) > body + max(o["size"][:2])
-                                  for o in self.layout.obstacles)
-            if clear:
+        first = None
+        for r in radii:
+            for k in sorted(range(24), key=lambda k: abs(np.angle(np.exp(1j * (2 * np.pi * k / 24 - home))))):
+                a = 2 * np.pi * k / 24
+                spot = xy + r * np.array([np.cos(a), np.sin(a)])
+                clear = all(np.hypot(*(self.obj_pos(n)[:2] - spot)) > body + self.radius(n)
+                            for n in self.things() if n != ignore)
+                clear = clear and all(np.hypot(*(np.asarray(o["pos"], float) - spot)) > body + max(o["size"][:2])
+                                      for o in self.layout.obstacles)
+                if not clear:
+                    continue
                 d = xy - spot
-                return np.array([spot[0], spot[1], float(np.arctan2(-d[0], d[1]))])
-        return None
+                pose = np.array([spot[0], spot[1], float(np.arctan2(-d[0], d[1]))])
+                if check is None or check(pose):
+                    return pose
+                first = pose if first is None else first
+        return first
+
+    def grips_from(self, name: str, pose) -> bool:
+        """Could the arm, its base standing at `pose`, reach `name` and get its jaws around it?"""
+        if not self.reachable_from(pose, self.obj_pos(name)[:2]):
+            return False
+        if self.arm.gripper["mode"] != "single":
+            return True
+        tries = 4 if self.shapes[name].grip(self.rot(name))[1] is None else 1      # a round outline: any direction
+        return any(self._jaw_fits(name, self._jaw_free_yaw(name) + k * np.pi / 4, pose)[0][2] for k in range(tries))
+
+    def pick_pose(self, name: str) -> np.ndarray:
+        """Where the base stands to pick `name` up: where it is when it can grip it from there, else (a mobile base) a
+        spot beside it from which it can."""
+        pose = self.hand.base.copy()
+        if not self.mobile or self.grips_from(name, pose):
+            return pose
+        at = self.standoff(self.obj_pos(name)[:2], ignore=name, check=lambda p: self.grips_from(name, p))
+        return pose if at is None else at
 
     def _overlap(self, xy, ignore: str | None = None) -> float:
         """How far a base standing at `xy` cuts into the things and the furniture (0: it touches nothing)."""
@@ -222,10 +267,19 @@ class World:
         return max(hs, default=0.0)
 
     def has_up(self, name: str) -> bool:
-        """Does it matter which way up it lies? Not for a ball: a round thing about as tall as it is wide, every way."""
-        pr = self.layout.props[int(name[5:])]
-        size = np.asarray(pr["size"], float)
-        return not (pr.get("shape") == "round" and not pr.get("mesh") and size.max() <= BALL_ROUNDNESS * size.min())
+        """Does it matter which way up it lies? Not for a ball: its surface is about as far from its centre everywhere
+        (measured on the shape the twin built, features/geometry.py)."""
+        return self.shapes[name].has_up
+
+    def rot(self, name: str, d=None) -> np.ndarray:
+        """How the object is turned right now (3x3)."""
+        d = d if d is not None else self.data
+        R = np.zeros(9)
+        mujoco.mju_quat2Mat(R, d.qpos[self.obj_qadr[name] + 3:self.obj_qadr[name] + 7])
+        return R.reshape(3, 3)
+
+    def mass(self, name: str) -> float:
+        return float(self.model.body_mass[self.obj_body[name]])
 
     def things(self) -> list[str]:
         """Everything the gripper might pick up."""
@@ -248,23 +302,37 @@ class World:
         pose = self.hand.base if pose is None else np.asarray(pose, float)
         return self.workspace.z_max(float(np.hypot(*self._rel(xy, pose)))) - 0.01
 
-    def stands(self, pick, place, ignore: str | None = None) -> tuple:
+    def stands(self, pick, place, ignore: str | None = None, on: str | None = None) -> tuple:
         """Where the base stands to pick up at `pick` and to set down at `place`: ((pose, drove there), (pose, drove there)),
-        the drive spot None when it does not move. A fixed base always stands where it is."""
+        the drive spot None when it does not move. A fixed base always stands where it is. A mobile base picks `ignore`
+        (the thing it carries) from where it can get its jaws around it, and sets it on `on` from where it can lift it
+        high enough over it."""
         pose = self.hand.base.copy()
         at_pick = at_place = None
-        if self.mobile and not self.reachable_from(pose, pick):
-            at_pick = self.standoff(pick, ignore=ignore)
+        if self.mobile:
+            if ignore is not None:
+                spot = self.pick_pose(ignore)
+                at_pick = None if np.allclose(spot, pose) else spot
+            elif not self.reachable_from(pose, pick):
+                at_pick = self.standoff(pick)
             pose = pose if at_pick is None else at_pick
         first = pose
-        if self.mobile and not self.reachable_from(pose, place):
-            at_place = self.standoff(place, ignore=ignore, near=pose[:2])
+
+        def sets_down(p) -> bool:
+            if not self.reachable_from(p, place):
+                return False
+            if on is None or ignore is None:
+                return True
+            top = float(self.obj_pos(on)[2] + self.half(on))
+            return self.ceiling(place, p) - self.stack_hang(ignore) - top >= self.stack_clear(ignore)
+        if self.mobile and not sets_down(pose):
+            at_place = self.standoff(place, ignore=ignore, near=pose[:2], check=sets_down)
             pose = pose if at_place is None else at_place
         return (first, at_pick), (pose, at_place)
 
-    def path_ceiling(self, pick, place, ignore: str | None = None) -> float:
+    def path_ceiling(self, pick, place, ignore: str | None = None, on: str | None = None) -> float:
         """The lowest ceiling the tool meets while it carries something from `pick` to `place` (see ceiling())."""
-        (p0, _), (p1, at_place) = self.stands(pick, place, ignore)
+        (p0, _), (p1, at_place) = self.stands(pick, place, ignore, on)
         pick, place = np.asarray(pick, float)[:2], np.asarray(place, float)[:2]
         if at_place is not None:                       # it drives on the way: lifts over the pick, lowers over the place
             return min(self.ceiling(pick, p0), self.ceiling(place, p1))
@@ -274,7 +342,12 @@ class World:
     def palm(self, name: str) -> float:
         """How far the tool point can go down over this object's top before a part of the arm above the jaws
         (the palm, the wrist) sits on it: rays up from the object's top, the tool pointing straight down."""
-        key = (round(self.grasp_width(name), 4), round(self.radius(name), 4))
+        R = self.rot(name)
+        yaw = self.grasp_yaw(name) if self.arm.gripper["mode"] != "single" else self._jaw_free_yaw(name)
+        top = self.shapes[name].top_outline(R)
+        c, s_ = np.cos(-yaw), np.sin(-yaw)
+        top = top @ np.array([[c, -s_], [s_, c]]).T              # in the frame where the jaws close along x
+        key = (name, round(self.grasp_width(name), 4), tuple(np.round(top, 3).ravel()))
         if key in self._palms:
             return self._palms[key]
         m, s = self.model, self.ik.scratch
@@ -287,12 +360,11 @@ class World:
         tool = s.site_xpos[self.site].copy()
         centre = tool
         if self.arm.gripper["mode"] == "single":           # the object stands beside the fixed jaw (grasp_offset); here the jaws close along x
-            centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP), 0, 0])
-        r = 0.6 * min(self.radius(name), 0.5 * self.grasp_width(name) + 0.01)
+            centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + self.fixed_gap), 0, 0])
         robot = self._robot_bodies()
         geomid = np.zeros(1, np.int32)
         best = 1.0
-        for dx, dy in ((0, 0), (r, 0), (-r, 0), (0, r), (0, -r)):
+        for dx, dy in top:                                 # rays up from under its top (its real outline)
             start = centre + np.array([dx, dy, 0.0])
             for _ in range(8):                           # skip what is not the robot (objects above, the scene)
                 dist = mujoco.mj_ray(m, s, start, np.array([0.0, 0.0, 1.0]), None, 1, -1, geomid)
@@ -308,6 +380,11 @@ class World:
         self._palms[key] = best
         return best
 
+    def _jaw_free_yaw(self, name: str) -> float:
+        """The direction across its narrowest width, before choosing which way round a single jaw goes."""
+        across = self.shapes[name].grip(self.rot(name))[1]
+        return float(across) if across is not None else 0.0
+
     def stack_hang(self, name: str, held: float = 0.0) -> float:
         """How far below the tool the bottom of `name` hangs, held `held` above its bottom (default: as low as the jaws go).
         A thing taller than the palm sticks up into the hand and is held higher than asked."""
@@ -319,58 +396,72 @@ class World:
         x, y = self._abs((rx, ry), self.hand.base)
         return (float(x), float(y))
 
-    def grasp_width(self, name: str) -> float:
-        """How far the jaws must open: the object's narrower horizontal side."""
-        hx, hy, _ = self.layout.props[int(name[5:])]["size"]
-        shape = self.layout.props[int(name[5:])].get("shape")
-        return 2 * ((hx + hy) / 2 if shape == "cylinder" else min(hx, hy))
+    def grasp_width(self, name: str, d=None) -> float:
+        """How far the jaws must open: the narrowest width across the part of it the jaws close on, as it lies now
+        (features/geometry.py: any outline, a scanned mesh too)."""
+        return self.shapes[name].grip(self.rot(name, d))[0]
 
-    def grasp_yaw(self, name: str) -> float:
-        """Direction to close the jaws along: across the narrower side (object axes, plus its own rotation)."""
-        pr = self.layout.props[int(name[5:])]
-        hx, hy, _ = pr["size"]
-        yaw = np.radians(float(pr.get("yaw", 0.0)))
-        if not (pr.get("shape") in ("cylinder", "round") or hx <= hy):
-            yaw = yaw + np.pi / 2
+    def grasp_yaw(self, name: str, d=None) -> float:
+        """Direction to close the jaws along: across its narrowest width. A round outline has none of its own: then along
+        the object's own heading. Of the two ways round, the one nearer its heading or square to it (how a box was always
+        gripped), so the wrist turns as little as it must."""
+        R = self.rot(name, d)
+        heading = float(np.arctan2(R[1, 0], R[0, 0]))
+        placed = np.radians(float(self.layout.props[int(name[5:])].get("yaw", 0.0)))
+        if abs(np.angle(np.exp(1j * (heading - placed)))) < np.radians(1.0):
+            heading = float(placed)                     # not turned since it was put there: settling is not turning
+        across = self.shapes[name].grip(R)[1]
+        if across is None:
+            yaw = heading
+        else:
+            refs = (heading, heading + np.pi / 2)
+            yaw = min((across + k * np.pi for k in (-1, 0, 1, 2)),
+                      key=lambda c: min(abs(np.angle(np.exp(1j * (c - r)))) for r in refs))
         if self.arm.gripper["mode"] != "single":
             return float(yaw)
-        return self._jaw_side(name, float(yaw))
+        pose = self.pick_pose(name) if self.mobile else None      # a mobile base: from where it will stand to pick it
+        if across is None:                              # a round outline: any direction grips it, so try a few
+            for k in range(4):
+                fits = self._jaw_fits(name, float(yaw + k * np.pi / 4), pose)
+                if fits[0][2]:
+                    return fits[0][1]
+        return self._jaw_fits(name, float(yaw), pose)[0][1]
 
-    def _jaw_side(self, name: str, yaw: float) -> float:
-        """A single moving jaw: which way round the arm can hold its jaws over this object. Closing along yaw or along
-        yaw + pi is the same line, but it decides on which side the fixed jaw stands, and the plan puts the fixed jaw beside
-        the thing (grasp_offset). The wrist cannot always turn half a turn, near the base the arm cannot come down on the
-        side facing it, and folded up the open jaw can hit the arm: ask the arm both ways round, where the tool will stand,
-        and keep the way asked when it works, else the one it does best."""
-        return self._jaw_fits(name, yaw)[0][1]
-
-    def _jaw_fits(self, name: str, yaw: float) -> list:
-        """[(score, yaw, works)] for both ways round, the one to use first. `works`: the tool gets there, lined up (within
-        30 degrees), without the arm hitting itself."""
+    def _jaw_fits(self, name: str, yaw: float, pose=None) -> list:
+        """[(score, yaw, works)] for both ways round, the one to use first, for a base standing at `pose` (default where it
+        stands). `works`: at the height it grips, the tool gets there lined up (within 30 degrees), it can come down to
+        there from above the thing's top, and the arm hits neither itself nor the table."""
         o = self.obj_pos(name)
-        key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(self.hand.base, 3)))
+        pose = self.hand.base if pose is None else np.asarray(pose, float)
+        key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(pose, 3)))
         cache = self.__dict__.setdefault("_jaw_cache", {})
         if key not in cache:
             if len(cache) > 256:
                 cache.clear()
-            self.ik.set_base(self.hand.base)
-            side = float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
+            self.ik.set_base(pose)
+            side = float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + self.fixed_gap)
+            low = max(float(o[2] - self.half(name)) + 0.004, Z_MIN)               # where the pads close on it
             fits = []
             for k, y in enumerate((yaw, yaw + np.pi)):
                 along = np.array([np.cos(y), np.sin(y), 0.0])
-                at = np.array([o[0], o[1], max(o[2], Z_MIN + 0.01)]) + along * side   # the tool beside it, low down
-                rel = self._rel(at, self.hand.base)
-                q, miss, _ = self.ik.solve(at, y, self.ik.q_down, iters=150, tilt=self.workspace.tilt_for(rel, float(at[2])))
+                at = np.array([o[0], o[1], low]) + along * side                   # the tool beside it, at grip height
+                rel = self._rel(at, pose)
+                tilt = self.workspace.tilt_for(rel, low)
+                q, miss, _ = self.ik.solve(at, y, self.ik.q_down, iters=150, tilt=tilt)
                 lined_up = float(self.ik.pose(q)[1] @ self.ik.c_axis @ along)
-                reach, clear = self.workspace.reachable(rel, float(at[2])), not self._hits_itself(q)
-                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0)   # 1 cm off ~ 11 degrees
+                above = self.ceiling(at, pose) >= float(o[2] + self.half(name)) + 0.005      # it comes down beside it from above
+                reach, clear = self.workspace.reachable(rel, low) and above, not self._collides(q)
+                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0)
                 works = reach and clear and miss < 0.005 and lined_up > np.cos(np.radians(30))
                 fits.append((works, -k if works else 0, score, y))  # one that works, as asked first; else the best score
+            self.ik.set_base(self.hand.base)
             cache[key] = [(f[2], f[3], f[0]) for f in sorted(fits, reverse=True)]
         return cache[key]
 
-    def _hits_itself(self, q) -> bool:
-        """Would the arm at joint values q, jaws open, touch itself? (On the solver's scratch copy.)"""
+    def _collides(self, q, deep: float = 0.003) -> bool:
+        """Would the arm at joint values q, jaws open, touch itself, its base or the scenery (the table, furniture; not the
+        things on the table, which it comes to grip, and not its jaws on the table, where they rest to grip a low thing)?
+        Contacts shallower than `deep` are a graze. (On the solver's copy.)"""
         m, s = self.model, self.ik.scratch
         jaws = [int(m.jnt_qposadr[m.actuator_trnid[a][0]]) for a in self.gact]
         was = s.qpos[jaws].copy()
@@ -378,11 +469,29 @@ class World:
         for a, v in zip(self.ik.qadr, q):
             s.qpos[a] = v
         mujoco.mj_fwdPosition(m, s)
-        robot = self._robot_bodies()
-        hit = any(int(m.geom_bodyid[c.geom1]) in robot and int(m.geom_bodyid[c.geom2]) in robot and c.dist < 0
-                  for c in s.contact[:s.ncon])
+        arm, props = self._robot_bodies(), set(self.obj_body.values())
+        hit = False
+        for c in s.contact[:s.ncon]:
+            a, b = int(m.geom_bodyid[c.geom1]), int(m.geom_bodyid[c.geom2])
+            if (a in arm) == (b in arm) and not (a in arm and b in arm):
+                continue                                     # nothing of the arm in it
+            other = b if a in arm else a
+            if other in props:
+                continue
+            mine = a if a in arm else b
+            if other not in arm and mine in self._gripper_bodies():
+                continue                                     # the jaws on the table: that is how it grips low things
+            if c.dist < (0.0 if other in arm else -deep):
+                hit = True
+                break
         s.qpos[jaws] = was
         return hit
+
+    def _gripper_bodies(self) -> set:
+        """The bodies the pads are on (the jaws)."""
+        if not hasattr(self, "_gripper_ids"):
+            self._gripper_ids = {int(self.model.geom_bodyid[g]) for g in self.pads}
+        return self._gripper_ids
 
     def _robot_bodies(self) -> set:
         if not hasattr(self, "_robot_ids"):
@@ -442,6 +551,26 @@ class World:
                 "grasp": round(grasp, 2), "reach": round(reach, 2), "most": round(most, 2),
                 "needed": None if why else round(k, 2), "why": why}
 
+    def size_to_stack(self, name: str, on: str) -> float | None:
+        """How big this arm would have to be (relative to the arm as described, like size_needed) to carry `name` high
+        enough over `on` to set it on top: its ceiling grows with its size, along the whole way there for a fixed base,
+        at the best spot for a mobile one. None when no size up to ARM_SIZE_MAX does."""
+        s = float(self.arm.scale)
+        need = float(self.obj_pos(on)[2] + self.half(on)) + self.stack_hang(name) + self.stack_clear(name)
+        top1 = lambda r1: self.workspace.z_max(r1 * s) / s                # the ceiling of the arm at size 1
+        if self.mobile:
+            best = max(top1(r / s) for r in self.workspace.RADII)
+            k = (need + 0.01) / max(best, 1e-6)
+            return round(float(k), 2) if k <= ARM_SIZE_MAX else None
+        base1 = np.asarray(self.base, float)[:2] - np.array([0.0, BASE_INSET * (s - 1)])
+        a, b = self.obj_pos(name)[:2], self.obj_pos(on)[:2]
+        path = [a + (b - a) * f for f in np.linspace(0.0, 1.0, max(2, int(np.linalg.norm(b - a) / 0.01) + 1))]
+        for k in np.arange(0.75, ARM_SIZE_MAX + 1e-9, 0.05):
+            base = base1 + np.array([0.0, BASE_INSET * (k - 1)])
+            if all(k * top1(float(np.hypot(*(p - base))) / k) - 0.01 >= need for p in path):
+                return round(float(k), 2)
+        return None
+
     def refusal(self, name: str, goal_xy=None, on: str | None = None) -> str:
         """Why the arm cannot move this object (to this spot, or on top of the object `on`), in plain words; empty when it can."""
         ok, why = self.can_grasp(name)
@@ -452,19 +581,23 @@ class World:
                 return "there is no free spot for me to stand next to it"
             if goal_xy is not None and self.standoff(goal_xy, ignore=name) is None:
                 return "there is no free spot for me to stand next to that place"
+            if not self.grips_from(name, self.pick_pose(name)):
+                return "I can't get my jaws around it from anywhere I can stand"
         else:
             if not self.reachable(self.obj_pos(name)[:2]):
                 return "it is out of my reach"
-            if self.arm.gripper["mode"] == "single" and not self._jaw_fits(name, self.grasp_yaw(name))[0][2]:
+            if self.arm.gripper["mode"] == "single" and not self._jaw_fits(name, self.grasp_yaw(name))[0][2]:   # no way round works
                 return "I can't get my jaws around it from here"
             if goal_xy is not None and not self.reachable(goal_xy):
                 return "the spot is out of my reach"
         if on is not None and goal_xy is not None:
             off = self.grasp_offset(name)[:2]
             top = float(self.obj_pos(on)[2] + self.half(on))
-            ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name)
-            if ceiling - self.stack_hang(name) - top < STACK_CLEAR:
-                return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here"
+            ceiling = self.path_ceiling(self.obj_pos(name)[:2] + off, np.asarray(goal_xy, float)[:2] + off, name, on)
+            if ceiling - self.stack_hang(name) - top < self.stack_clear(name):
+                k = self.size_to_stack(name, on)
+                bigger = f" (an arm {k / float(self.arm.scale):.1f} times my size could)" if k and k > self.arm.scale else ""
+                return f"I can't lift it high enough over the {self.layout.props[int(on[5:])]['name']} from here{bigger}"
         return ""
 
     def grasp_offset(self, name: str, yaw: float | None = None) -> np.ndarray:
@@ -475,7 +608,18 @@ class World:
             return np.zeros(3)
         y = self.grasp_yaw(name) if yaw is None else float(yaw)
         side = float(self.arm.gripper.get("fixed_side", 1))
-        return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + FIXED_JAW_GAP)
+        return np.array([np.cos(y), np.sin(y), 0.0]) * side * (self.grasp_width(name) / 2 + self.fixed_gap)
+
+    @property
+    def fixed_gap(self) -> float:
+        """A single jaw: how far beside the thing the fixed jaw comes down. The arm's own ("fixed_gap" in its gripper,
+        resized with it), else FIXED_JAW_GAP times its size: a bigger arm is less precise in millimetres."""
+        g = self.arm.gripper
+        return float(g["fixed_gap"]) if "fixed_gap" in g else FIXED_JAW_GAP * float(self.arm.scale)
+
+    def stack_clear(self, name: str) -> float:
+        """How far above the other top the bottom of `name` passes when it is carried there to be stacked."""
+        return max(STACK_CLEAR, STACK_CLEAR_SHARE * 2 * self.half(name))
 
     # ---------- queries ----------
     def hand_pos(self, d=None) -> np.ndarray:

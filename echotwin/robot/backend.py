@@ -33,8 +33,8 @@ import numpy as np
 
 CONTRACT = ("step", "hand_pos", "grip_settled", "go_rest", "stop", "resume", "close", "obj_pos", "tilt", "has_up", "things",
             "half", "radius", "tallest", "reachable", "can_grasp", "refusal", "grasp_offset", "grasp_yaw", "carry_height",
-            "path_ceiling", "stack_hang", "workspace_sample", "clone", "settle", "arm_ready", "observe", "observe_pose",
-            "set_obj_pose", "see_tool")
+            "path_ceiling", "stack_hang", "stack_clear", "workspace_sample", "clone", "settle", "arm_ready", "observe",
+            "observe_pose", "set_obj_pose", "see_tool")
 
 
 @runtime_checkable

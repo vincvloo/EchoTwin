@@ -14,7 +14,7 @@ import os
 
 import numpy as np
 
-from ..world import CTRL_DT, STACK_CLEAR, VMAX, World
+from ..world import CTRL_DT, VMAX, World
 from . import measure as M
 from . import move_things as MT
 
@@ -32,11 +32,12 @@ def make_task(world: World, plan: dict, heard: str) -> dict:
     pr = world.layout.props[i]
     goal = MT.goal_xy(world, plan)
     o = world.obj_pos(me)
-    shape = pr.get("shape", "box")
-    task = {"kind": "prop", "plan": plan, "object": me, "target": f"{shape} things", "shape": shape,
+    shape = pr.get("shape", "box")                      # how the twin draws it, kept with the demo; the robot reads `m`
+    m = M.measure(world, me)
+    task = {"kind": "prop", "plan": plan, "object": me, "target": M.CLASS_LABEL[M.size_class(m)], "shape": shape,
             "name": pr["name"], "instruction": heard, "goal": [float(goal[0]), float(goal[1])],
             "ref": f"prop_{plan['goal'][1]}" if plan["goal"][0] == "near" else None,
-            "h": float(world.half(me)), "tallest": float(world.tallest()), "m": M.measure(world, me),
+            "h": float(world.half(me)), "tallest": float(world.tallest()), "m": m,
             "start": [float(o[0]), float(o[1])]}
     if plan["goal"][0] == "near" and plan["goal"][2] == "on top of":
         task["stack"] = True
@@ -117,22 +118,24 @@ def waypoints(world: World, task: dict, skill: dict, d=None, pos=None) -> list:
     if task.get("stack"):  # set it down on top of the other object
         ref = task["ref"]
         top = float(world.obj_pos(ref, d)[2] + world.half(ref))
-        carry = float(min(max(carry, top + h + skill["drop"] + 0.056), carry_max, world.path_ceiling((ox, oy), (gx, gy), me)))
+        carry = float(min(max(carry, top + h + skill["drop"] + 0.056), carry_max,
+                          world.path_ceiling((ox, oy), (gx, gy), me, ref)))
         # what hangs below the tool must clear the other object's top: under a low ceiling, hold it lower down
         bottom = float(o[2] - h)
-        grasp_z = float(max(min(grasp_z, carry - STACK_CLEAR - top + bottom), bottom + 0.004, 0.004))
+        grasp_z = float(max(min(grasp_z, carry - world.stack_clear(me) - top + bottom), bottom + 0.004, 0.004))
         hang = world.stack_hang(me, grasp_z - bottom)
         release_z = float(min(top + max(h, hang) + skill["drop"] + 0.006, carry))
     steps = [("move", [ox, oy, carry]), ("move", [ox, oy, grasp_z]), ("grip", 1.0), ("move", [ox, oy, carry]),
              ("move", [gx, gy, carry]), ("move", [gx, gy, release_z]), ("grip", 0.0),
              ("move", [gx, gy, carry])]
-    return with_drives(world, steps, (ox, oy), (gx, gy), me) if getattr(world, "mobile", False) else steps
+    on = task["ref"] if task.get("stack") else None
+    return with_drives(world, steps, (ox, oy), (gx, gy), me, on) if getattr(world, "mobile", False) else steps
 
 
-def with_drives(world: World, steps: list, pick, place, me: str) -> list:
-    """A mobile base drives first when the object, or later the place, is out of the arm's reach from where it stands:
-    drive, stop, then the arm moves as on a fixed base."""
-    (_, at_pick), (_, at_place) = world.stands(pick, place, me)
+def with_drives(world: World, steps: list, pick, place, me: str, on: str | None = None) -> list:
+    """A mobile base drives first when it cannot pick the object from where it stands, and again when it cannot set it
+    down (on top of `on`) from there: drive, stop, then the arm moves as on a fixed base (World.stands)."""
+    (_, at_pick), (_, at_place) = world.stands(pick, place, me, on)
     out = list(steps)
     if at_pick is not None:
         out.insert(0, ("drive", at_pick.tolist()))

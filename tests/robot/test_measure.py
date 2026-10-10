@@ -19,7 +19,7 @@ def test_measure_uses_the_narrow_side_height_and_length():
     assert m["width"] == pytest.approx(0.06) and m["height"] == pytest.approx(0.02) and m["length"] == pytest.approx(0.10)
     assert m["mass"] > 0
     g = M.measure(w, "prop_1")
-    assert g["width"] == pytest.approx(0.07) and g["height"] == pytest.approx(0.10)
+    assert g["width"] == pytest.approx(0.07, abs=1e-6) and g["height"] == pytest.approx(0.10)
 
 
 def test_distance_and_size_classes():

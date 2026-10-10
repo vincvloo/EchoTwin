@@ -120,6 +120,8 @@ class ArmSpec:
         g = dict(self.gripper)
         if g["mode"] == "parallel":
             g["open"], g["closed"] = [v * k for v in g["open"]], [v * k for v in g["closed"]]
+        if "fixed_gap" in g:                       # a single jaw's gap beside the thing is a length too
+            g["fixed_gap"] = float(g["fixed_gap"]) * k
         return replace(self, scale=float(scale), gripper=g, tool={**self.tool, "pos": [v * k for v in self.tool["pos"]]},
                        max_opening=(self.max_opening or 0.08) * k)
 

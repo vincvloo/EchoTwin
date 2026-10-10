@@ -2,6 +2,7 @@
 
     python -m echotwin.robot.skillcheck                 # 6 trials per shape and task, writes out/skillcheck.json
     python -m echotwin.robot.skillcheck --trials 12 --shapes box cylinder
+    python -m echotwin.robot.skillcheck --shapes varied --trials 30 --jobs 3    # random everyday objects (varied.py)
 
 One trial: a table with the object to move (one of the four shapes, real size) and a small box, the object's
 position drawn at random inside what the arm can reach, then the whole move with the default skill (grip height,
@@ -10,6 +11,11 @@ without knocking anything over. The failure reason is the first thing that went 
 
 It only uses the public pieces (World, prop_skills, move_things), so the same file runs on the older kinematic
 simulation and on the arm with a contact grasp: that is how the two were compared (docs/RESULTS.md).
+
+"varied" is a row of random everyday objects instead of one fixed shape: any proportions and rotation, balls, eggs and
+meshes revolved from silhouettes (bottles, cups, vases), as a scan builds them. Each cell has its own random draws
+(seed, shape, task), so a change that alters one cell's layouts does not shuffle the others: two versions of the code
+see the same layouts.
 """
 from __future__ import annotations
 
@@ -22,6 +28,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import varied
 from .features import move_things as MT
 from .features import prop_skills as PS
 from .scene import Layout
@@ -31,6 +38,7 @@ from .world import CTRL_DT, World
 SHAPES = {"flat": (0.10, 0.06, 0.02), "box": (0.05, 0.04, 0.04), "cylinder": (0.07, 0.07, 0.10), "round": (0.05, 0.05, 0.05)}
 OTHER = (0.05, 0.05, 0.05)
 TASKS = ("next to", "to the left", "on top of")
+ROWS = (*SHAPES, "varied")    # what --shapes may name
 RGB = {"flat": (0.9, 0.9, 0.85), "box": (0.2, 0.4, 0.8), "cylinder": (0.8, 0.8, 0.8), "round": (0.2, 0.2, 0.2)}
 MAX_TICKS = 1200
 
@@ -74,20 +82,28 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     for _ in range(60):             # draw until the arm can reach both the object and the spot (else it would decline)
         (ax, ay), (bx, by) = _spawn(rng, probe, k)
         lay = Layout()
-        lay.props = [_prop("mover", shape, size or SHAPES[shape], (ax, ay), k), _prop("other", "box", OTHER, (bx, by), k)]
+        if shape == "varied":
+            mover = varied.draw(rng, k=k)
+            mover["pos"] = (ax * k, ay * k)
+        else:
+            mover = _prop("mover", shape, size or SHAPES[shape], (ax, ay), k)
+        lay.props = [mover, _prop("other", "box", OTHER, (bx, by), k)]
         w = World(lay)
         w.settle(20)
         plan = {"prop": 0, "goal": ("near", 1, task_name) if task_name != "to the left" else ("dir", (-1, 0), 0.12 * k)}
         if not hasattr(w, "refusal"):
             break
         if w.can_grasp("prop_0")[0] is False:
-            return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0}
+            if shape == "varied":                   # a random thing too wide for these jaws: draw another
+                why_not = "too wide for the gripper"
+                continue
+            return {"ok": False, "why": "refused: too wide for the gripper", "seconds": 0.0, "kind": shape}
         goal = MT.goal_xy(w, plan)
         why_not = w.refusal("prop_0", goal, on="prop_1" if task_name == "on top of" else None)
         if not why_not:
             break
     else:                           # 60 layouts and the arm would decline every one: it declines, it does not try
-        return {"ok": False, "why": f"refused: {why_not}", "seconds": 0.0}
+        return {"ok": False, "why": f"refused: {why_not}", "seconds": 0.0, "kind": mover.get("kind", shape)}
     if backend == "mock":                       # the same move, on an arm that is not the simulation
         from .drivers import MockDriver
         from .real import RealBackend, mock_camera
@@ -135,7 +151,7 @@ def trial(shape: str, task_name: str, rng: np.random.Generator, size=None, skill
     why = "" if ok else (res["text"] if not res["ok"] else "it did not end where it should")
     if ticks >= limit:
         why, ok = "ran out of time", False
-    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT, "style": style, "task": task,
+    return {"ok": ok, "why": why, "seconds": ticks * CTRL_DT, "style": style, "task": task, "kind": mover.get("kind", shape),
             "attempts": (r.get("loop") or {}).get("attempts"), "log": (r.get("loop") or {}).get("log")}
 
 
@@ -147,26 +163,49 @@ def reason_key(why: str) -> str:
     return why[:40] or "ok"
 
 
+def cell(shape: str, task: str, trials: int, seed: int, policy=None, **kw) -> dict:
+    """One cell (a shape or "varied", a task), with its own random draws: the same layouts whatever else is run."""
+    rng = np.random.default_rng([seed, ROWS.index(shape), TASKS.index(task)])
+    t0 = time.time()
+    rs = [trial(shape, task, rng, policy=policy, **kw) for _ in range(trials)]
+    wins = [r for r in rs if r["ok"]]
+    kinds: dict = {}
+    for r in rs:
+        k = kinds.setdefault(str(r.get("kind", shape)), [0, 0])
+        k[0] += int(r["ok"])
+        k[1] += 1
+    return {"success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
+            "failures": dict(Counter(reason_key(r["why"]) for r in rs if not r["ok"])), "wall": round(time.time() - t0, 1),
+            "kinds": kinds}
+
+
+def _cell_job(args):
+    shape, task, trials, seed, kw = args
+    return shape, task, cell(shape, task, trials, seed, **kw)
+
+
 def run(trials: int, shapes, tasks, seed: int = 7, backend: str = "sim", loop: bool = False, disturb: str | None = None, policy=None,
-        align: bool | None = None, encoder_offset: float | None = None, mock: dict | None = None) -> dict:
-    rng = np.random.default_rng(seed)
-    out = {"scale": _scale(), "trials": trials, "backend": backend, "loop": loop, "disturb": disturb, "cells": {}}
-    for s in shapes:
-        for t in tasks:
-            t0 = time.time()
-            rs = [trial(s, t, rng, backend=backend, loop=loop, disturb=disturb, policy=policy, align=align, encoder_offset=encoder_offset, mock=mock)
-                  for _ in range(trials)]
-            wins = [r for r in rs if r["ok"]]
-            out["cells"][f"{s} | {t}"] = {
-                "success": len(wins) / trials, "seconds": float(np.mean([r["seconds"] for r in wins])) if wins else None,
-                "failures": dict(Counter(reason_key(r["why"]) for r in rs if not r["ok"])), "wall": round(time.time() - t0, 1)}
-            c = out["cells"][f"{s} | {t}"]
-            print(f"  {s:9s} {t:12s} {c['success']:4.0%}  {c['failures'] or ''}", flush=True)
+        align: bool | None = None, encoder_offset: float | None = None, mock: dict | None = None, jobs: int = 1) -> dict:
+    out = {"scale": _scale(), "trials": trials, "backend": backend, "loop": loop, "disturb": disturb, "seed": seed, "cells": {}}
+    kw = {"backend": backend, "loop": loop, "disturb": disturb, "align": align, "encoder_offset": encoder_offset, "mock": mock}
+    todo = [(s, t) for s in shapes for t in tasks]
+
+    def show(s, t, c):
+        out["cells"][f"{s} | {t}"] = c
+        print(f"  {s:9s} {t:12s} {c['success']:4.0%}  {c['failures'] or ''}", flush=True)
+    if jobs > 1 and policy is None:
+        from concurrent.futures import ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=jobs) as ex:
+            for s, t, c in ex.map(_cell_job, [(s, t, trials, seed, kw) for s, t in todo]):
+                show(s, t, c)
+    else:
+        for s, t in todo:
+            show(s, t, cell(s, t, trials, seed, policy=policy, **kw))
     return out
 
 
 def table(res: dict) -> str:
-    shapes = sorted({k.split(" | ")[0] for k in res["cells"]}, key=list(SHAPES).index)
+    shapes = sorted({k.split(" | ")[0] for k in res["cells"]}, key=list(ROWS).index)
     tasks = [t for t in TASKS if any(k.endswith(" | " + t) for k in res["cells"])]
     lines = ["| Shape | " + " | ".join(tasks) + " |", "|---|" + "---|" * len(tasks)]
     for s in shapes:
@@ -177,6 +216,16 @@ def table(res: dict) -> str:
         lines.append(f"| {s} | " + " | ".join(cells) + " |")
     ok = np.mean([c["success"] for c in res["cells"].values()])
     lines.append("| **all** | " + " | ".join([""] * (len(tasks) - 1) + [f"**{ok:.0%}**"]) + " |")
+    kinds: dict = {}
+    for key, c in res["cells"].items():                   # the varied row, per kind of object
+        if key.startswith("varied |"):
+            for kind, (won, n) in c.get("kinds", {}).items():
+                kinds.setdefault(kind, [0, 0])
+                kinds[kind][0] += won
+                kinds[kind][1] += n
+    if kinds:
+        lines += ["", "| Varied: kind | moves | done |", "|---|---|---|"]
+        lines += [f"| {k} | {n} | {won / n:.0%} |" for k, (won, n) in sorted(kinds.items())]
     return "\n".join(lines)
 
 
@@ -267,7 +316,9 @@ def gap_table(sim: dict, mock: dict, labels=("sim", "mock arm")) -> str:
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--trials", type=int, default=6)
-    ap.add_argument("--shapes", nargs="+", default=list(SHAPES), choices=list(SHAPES))
+    ap.add_argument("--shapes", nargs="+", default=list(SHAPES), choices=list(ROWS),
+                    help="the fixed shapes (default) and/or varied: random everyday objects")
+    ap.add_argument("--jobs", type=int, default=1, help="cells run side by side in this many processes")
     ap.add_argument("--tasks", nargs="+", default=list(TASKS), choices=list(TASKS))
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="out/skillcheck.json")
@@ -318,7 +369,7 @@ def main(argv=None):
         pol = ChunkPolicy.load(a.policy)
     res = run(a.trials, a.shapes, a.tasks, a.seed, a.backend, loop=a.loop, disturb=a.disturb, policy=pol,
               align=None if a.align is None else a.align == "on", encoder_offset=a.encoder_offset,
-              mock={"lag": a.mock_lag, "mass_scale": a.mock_mass, "friction_scale": a.mock_friction})
+              mock={"lag": a.mock_lag, "mass_scale": a.mock_mass, "friction_scale": a.mock_friction}, jobs=a.jobs)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     Path(a.out).write_text(json.dumps(res, indent=1), encoding="utf-8")
     print("\n" + table(res))
