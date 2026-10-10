@@ -148,16 +148,16 @@ class World:
     def standoff(self, xy, ignore: str | None = None, near=None, check=None) -> np.ndarray | None:
         """Where a mobile base should stand to work on `xy`: facing it, at the middle of the arm's reach, its footprint
         clear of the things on the table and the furniture (`ignore`: the object it works on). The spot nearest to
-        `near` (default: where the base is) comes first. `check(pose)`: what must work from there (the grip, the carry);
-        nearer and further spots are tried for it, and when none passes, the first free spot is given. None when there
-        is no free spot."""
+        `near` (default: where the base is) comes first; nearer and further spots are tried when the middle has none.
+        `check(pose)`: what must work from there (the grip, the carry); when no spot passes, the first free one is given.
+        None when there is no free spot."""
         xy = np.asarray(xy, float)[:2]
         near = self.hand.base[:2] if near is None else np.asarray(near, float)[:2]
         body = 0.5 * float(np.hypot(*self.robot.footprint)) + 0.02
         front = 0.5 * self.robot.footprint[1] + 0.05           # the arm cannot work under its own base
         lo, hi = max(self.workspace.r_min, front), self.workspace.r_max - 0.02
         mid = float(np.clip(0.5 * (self.workspace.r_min + self.workspace.r_max), front, hi))
-        radii = [mid] + ([r for r in np.linspace(lo, hi, 5) if abs(r - mid) > 0.01] if check is not None else [])
+        radii = [mid] + [r for r in np.linspace(lo, hi, 5) if abs(r - mid) > 0.01]   # the middle first, then nearer, further
         home = float(np.arctan2(*(near - xy)[::-1]))
         first = None
         for r in radii:
@@ -429,8 +429,8 @@ class World:
 
     def _jaw_fits(self, name: str, yaw: float, pose=None) -> list:
         """[(score, yaw, works)] for both ways round, the one to use first, for a base standing at `pose` (default where it
-        stands). `works`: at the height it grips, the tool gets there lined up (within 30 degrees), the arm hits neither
-        itself nor the table, and where the arm has to lean out its hand does not hang over the thing."""
+        stands). `works`: at the height it grips, the tool gets there lined up (within 30 degrees), it can come down to
+        there from above the thing's top, and the arm hits neither itself nor the table."""
         o = self.obj_pos(name)
         pose = self.hand.base if pose is None else np.asarray(pose, float)
         key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(pose, 3)))
@@ -449,11 +449,10 @@ class World:
                 tilt = self.workspace.tilt_for(rel, low)
                 q, miss, _ = self.ik.solve(at, y, self.ik.q_down, iters=150, tilt=tilt)
                 lined_up = float(self.ik.pose(q)[1] @ self.ik.c_axis @ along)
-                reach, clear = self.workspace.reachable(rel, low), not self._collides(q)
-                out = rel / max(float(np.hypot(*rel)), 1e-9)                    # away from the base
-                over = tilt > 0 and float((self._rel(o, pose) - rel) @ out) < -0.25 * abs(side)   # the thing on the base side
-                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0) - (0.5 if over else 0.0)
-                works = reach and clear and not over and miss < 0.005 and lined_up > np.cos(np.radians(30))
+                above = self.ceiling(at, pose) >= float(o[2] + self.half(name)) + 0.005      # it comes down beside it from above
+                reach, clear = self.workspace.reachable(rel, low) and above, not self._collides(q)
+                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0)
+                works = reach and clear and miss < 0.005 and lined_up > np.cos(np.radians(30))
                 fits.append((works, -k if works else 0, score, y))  # one that works, as asked first; else the best score
             self.ik.set_base(self.hand.base)
             cache[key] = [(f[2], f[3], f[0]) for f in sorted(fits, reverse=True)]

@@ -73,16 +73,6 @@ def test_a_parallel_gripper_is_not_affected():
     assert w.grasp_offset("prop_0", 1.0).tolist() == [0.0, 0.0, 0.0] and "jaws around" not in w.refusal("prop_0")
 
 
-def test_leaning_out_its_hand_does_not_hang_over_the_thing():
-    """Far out the arm leans; standing on the far side of a thing would put its hand over the thing and press it down."""
-    w = _world("box", (0.0, 0.10))                          # 33 cm in front of the base: it leans there
-    off = w.grasp_offset("prop_0")
-    assert w.workspace.tilt_for(w._rel(w.obj_pos("prop_0")[:2] + off[:2], w.hand.base), 0.01) > 0
-    assert off[1] < 0                                        # the tool on the base side, the thing further out
-    fits = w._jaw_fits("prop_0", w._jaw_free_yaw("prop_0"))
-    assert [ok for _, y, ok in fits if np.sin(y) > 0] == [False]
-
-
 def test_a_round_outline_is_gripped_from_another_direction_when_one_fails():
     w = _world("round", (0.25, 0.0))
     assert w.refusal("prop_0") == ""
