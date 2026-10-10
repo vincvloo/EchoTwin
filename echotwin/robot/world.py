@@ -112,6 +112,7 @@ class World:
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
         self._palms = {}
         self.__dict__.pop("_robot_ids", None)
+        self.__dict__.pop("_gripper_ids", None)
         self.__dict__.pop("_jaw_cache", None)
         self.go_rest(teleport=True)
 
@@ -375,6 +376,11 @@ class World:
                       key=lambda c: min(abs(np.angle(np.exp(1j * (c - r)))) for r in refs))
         if self.arm.gripper["mode"] != "single":
             return float(yaw)
+        if across is None:                              # a round outline: any direction grips it, so try a few
+            for k in range(4):
+                fits = self._jaw_fits(name, float(yaw + k * np.pi / 4))
+                if fits[0][2]:
+                    return fits[0][1]
         return self._jaw_side(name, float(yaw))
 
     def _jaw_side(self, name: str, yaw: float) -> float:
@@ -385,33 +391,42 @@ class World:
         and keep the way asked when it works, else the one it does best."""
         return self._jaw_fits(name, yaw)[0][1]
 
-    def _jaw_fits(self, name: str, yaw: float) -> list:
-        """[(score, yaw, works)] for both ways round, the one to use first. `works`: the tool gets there, lined up (within
-        30 degrees), without the arm hitting itself."""
+    def _jaw_fits(self, name: str, yaw: float, pose=None) -> list:
+        """[(score, yaw, works)] for both ways round, the one to use first, for a base standing at `pose` (default where it
+        stands). `works`: at the height it grips, the tool gets there lined up (within 30 degrees), the arm hits neither
+        itself nor the table, and where the arm has to lean out its hand does not hang over the thing."""
         o = self.obj_pos(name)
-        key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(self.hand.base, 3)))
+        pose = self.hand.base if pose is None else np.asarray(pose, float)
+        key = (name, round(float(o[0]), 3), round(float(o[1]), 3), round(yaw, 3), tuple(np.round(pose, 3)))
         cache = self.__dict__.setdefault("_jaw_cache", {})
         if key not in cache:
             if len(cache) > 256:
                 cache.clear()
-            self.ik.set_base(self.hand.base)
+            self.ik.set_base(pose)
             side = float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + self.fixed_gap)
+            low = max(float(o[2] - self.half(name)) + 0.004, Z_MIN)               # where the pads close on it
             fits = []
             for k, y in enumerate((yaw, yaw + np.pi)):
                 along = np.array([np.cos(y), np.sin(y), 0.0])
-                at = np.array([o[0], o[1], max(o[2], Z_MIN + 0.01)]) + along * side   # the tool beside it, low down
-                rel = self._rel(at, self.hand.base)
-                q, miss, _ = self.ik.solve(at, y, self.ik.q_down, iters=150, tilt=self.workspace.tilt_for(rel, float(at[2])))
+                at = np.array([o[0], o[1], low]) + along * side                   # the tool beside it, at grip height
+                rel = self._rel(at, pose)
+                tilt = self.workspace.tilt_for(rel, low)
+                q, miss, _ = self.ik.solve(at, y, self.ik.q_down, iters=150, tilt=tilt)
                 lined_up = float(self.ik.pose(q)[1] @ self.ik.c_axis @ along)
-                reach, clear = self.workspace.reachable(rel, float(at[2])), not self._hits_itself(q)
-                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0)   # 1 cm off ~ 11 degrees
-                works = reach and clear and miss < 0.005 and lined_up > np.cos(np.radians(30))
+                reach, clear = self.workspace.reachable(rel, low), not self._collides(q)
+                out = rel / max(float(np.hypot(*rel)), 1e-9)                    # away from the base
+                over = tilt > 0 and float((self._rel(o, pose) - rel) @ out) < -0.25 * abs(side)   # the thing on the base side
+                score = lined_up - JAW_MISS_COST * miss - (0.0 if reach else 1.0) - (0.0 if clear else 1.0) - (0.5 if over else 0.0)
+                works = reach and clear and not over and miss < 0.005 and lined_up > np.cos(np.radians(30))
                 fits.append((works, -k if works else 0, score, y))  # one that works, as asked first; else the best score
+            self.ik.set_base(self.hand.base)
             cache[key] = [(f[2], f[3], f[0]) for f in sorted(fits, reverse=True)]
         return cache[key]
 
-    def _hits_itself(self, q) -> bool:
-        """Would the arm at joint values q, jaws open, touch itself? (On the solver's scratch copy.)"""
+    def _collides(self, q, deep: float = 0.003) -> bool:
+        """Would the arm at joint values q, jaws open, touch itself, its base or the scenery (the table, furniture; not the
+        things on the table, which it comes to grip, and not its jaws on the table, where they rest to grip a low thing)?
+        Contacts shallower than `deep` are a graze. (On the solver's copy.)"""
         m, s = self.model, self.ik.scratch
         jaws = [int(m.jnt_qposadr[m.actuator_trnid[a][0]]) for a in self.gact]
         was = s.qpos[jaws].copy()
@@ -419,11 +434,33 @@ class World:
         for a, v in zip(self.ik.qadr, q):
             s.qpos[a] = v
         mujoco.mj_fwdPosition(m, s)
-        robot = self._robot_bodies()
-        hit = any(int(m.geom_bodyid[c.geom1]) in robot and int(m.geom_bodyid[c.geom2]) in robot and c.dist < 0
-                  for c in s.contact[:s.ncon])
+        arm, props = self._robot_bodies(), set(self.obj_body.values())
+        hit = False
+        for c in s.contact[:s.ncon]:
+            a, b = int(m.geom_bodyid[c.geom1]), int(m.geom_bodyid[c.geom2])
+            if (a in arm) == (b in arm) and not (a in arm and b in arm):
+                continue                                     # nothing of the arm in it
+            other = b if a in arm else a
+            if other in props:
+                continue
+            mine = a if a in arm else b
+            if other not in arm and mine in self._gripper_bodies():
+                continue                                     # the jaws on the table: that is how it grips low things
+            if c.dist < (0.0 if other in arm else -deep):
+                hit = True
+                break
         s.qpos[jaws] = was
         return hit
+
+    def _hits_itself(self, q) -> bool:
+        """Would the arm at joint values q, jaws open, touch itself (or the scenery)? See _collides."""
+        return self._collides(q)
+
+    def _gripper_bodies(self) -> set:
+        """The bodies the pads are on (the jaws)."""
+        if not hasattr(self, "_gripper_ids"):
+            self._gripper_ids = {int(self.model.geom_bodyid[g]) for g in self.pads}
+        return self._gripper_ids
 
     def _robot_bodies(self) -> set:
         if not hasattr(self, "_robot_ids"):
@@ -496,7 +533,7 @@ class World:
         else:
             if not self.reachable(self.obj_pos(name)[:2]):
                 return "it is out of my reach"
-            if self.arm.gripper["mode"] == "single" and not self._jaw_fits(name, self.grasp_yaw(name))[0][2]:
+            if self.arm.gripper["mode"] == "single" and not self._jaw_fits(name, self.grasp_yaw(name))[0][2]:   # no way round works
                 return "I can't get my jaws around it from here"
             if goal_xy is not None and not self.reachable(goal_xy):
                 return "the spot is out of my reach"

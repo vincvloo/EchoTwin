@@ -71,3 +71,29 @@ def test_a_parallel_gripper_is_not_affected():
     lay.props = [S._prop("mover", "flat", S.SHAPES["flat"], (-0.04, -0.11), 1.0)]
     w = World(lay)
     assert w.grasp_offset("prop_0", 1.0).tolist() == [0.0, 0.0, 0.0] and "jaws around" not in w.refusal("prop_0")
+
+
+def test_leaning_out_its_hand_does_not_hang_over_the_thing():
+    """Far out the arm leans; standing on the far side of a thing would put its hand over the thing and press it down."""
+    w = _world("box", (0.0, 0.10))                          # 33 cm in front of the base: it leans there
+    off = w.grasp_offset("prop_0")
+    assert w.workspace.tilt_for(w._rel(w.obj_pos("prop_0")[:2] + off[:2], w.hand.base), 0.01) > 0
+    assert off[1] < 0                                        # the tool on the base side, the thing further out
+    fits = w._jaw_fits("prop_0", w._jaw_free_yaw("prop_0"))
+    assert [ok for _, y, ok in fits if np.sin(y) > 0] == [False]
+
+
+def test_a_round_outline_is_gripped_from_another_direction_when_one_fails():
+    w = _world("round", (0.25, 0.0))
+    assert w.refusal("prop_0") == ""
+    assert any(ok for _, _, ok in w._jaw_fits("prop_0", w.grasp_yaw("prop_0")))
+
+
+def test_the_arm_against_the_table_counts_its_jaws_resting_on_it_does_not():
+    w = _world("box", (0.0, -0.05))
+    at = w.obj_pos("prop_0") + w.grasp_offset("prop_0")
+    at[2] = 0.004
+    q = w.ik.solve(at, w.grasp_yaw("prop_0"), w.ik.q_down, iters=150)[0]
+    assert not w._collides(q)                               # gripping low: the jaws sit on the table
+    sunk = w.ik.solve(at - np.array([0.0, 0.0, 0.12]), w.grasp_yaw("prop_0"), w.ik.q_down, iters=200)[0]
+    assert w._collides(sunk)                                # 12 cm into the table: past the jaws, the wrist is in it
