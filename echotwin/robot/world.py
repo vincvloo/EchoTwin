@@ -12,7 +12,8 @@ import numpy as np
 
 from . import arm as A
 from . import robots as RB
-from .scene import Layout, build_xml
+from .features import geometry as GE
+from .scene import DENSITY, Layout, build_xml
 
 CTRL_HZ = 20
 CTRL_DT = 1.0 / CTRL_HZ
@@ -26,7 +27,6 @@ JAW_MISS_COST = 2.0         # per metre the tool falls short, when choosing whic
 FIXED_JAW_GAP = 0.008       # a single jaw: the fixed jaw comes down this far beside the thing, then the moving jaw pushes it over
 GRIP_MARGIN = 0.004         # an object must be this much narrower than the opening
 STACK_CLEAR = 0.015         # m: a carried object's bottom passes this far above the top it is to be set on
-BALL_ROUNDNESS = 1.15       # a round thing whose sizes are within 15 % of each other is a ball: it has no up (has_up)
 MIN_THICKNESS = 0.015       # thinner than this cannot be pinched from a table (measured, docs/RESULTS.md)
 
 
@@ -88,10 +88,23 @@ class World:
             self.obj_dadr[n] = m.jnt_dofadr[m.joint(n).id]
             self.obj_body[n] = m.body(n).id
         self._body_to_prop = {b: n for n, b in self.obj_body.items()}
+        # each object's shape as the twin built it (box, cylinder, ellipsoid or scanned mesh): what the robot reads
+        self.shapes = {n: GE.of_body(m, b) for n, b in self.obj_body.items()}
+        reweighed = False
+        for n, b in self.obj_body.items():          # a scanned mesh weighs what its own volume would, not its box's
+            vol = sum(v for g in range(m.ngeom) if int(m.geom_bodyid[g]) == b
+                      for v in [GE.mesh_volume(m, g)] if v is not None)
+            if vol > 0:
+                mass = float(np.clip(vol * DENSITY, 0.02, 0.4))
+                m.body_inertia[b] *= mass / m.body_mass[b]
+                m.body_mass[b] = mass
+                reweighed = True
         for a, v in zip(self.ik.qadr, self.arm.home):
             self.data.qpos[a] = v
         for a, act, v in zip(self.ik.base_qadr, self.base_act, self.hand.base):
             self.data.qpos[a], self.data.ctrl[act] = v, v
+        if reweighed:
+            mujoco.mj_setConst(m, self.data)
         mujoco.mj_forward(m, self.data)
         self.ik.seed_down((0.0, 0.22))
         self.workspace = A.Workspace.for_arm(self.ik, self.arm)
@@ -222,10 +235,19 @@ class World:
         return max(hs, default=0.0)
 
     def has_up(self, name: str) -> bool:
-        """Does it matter which way up it lies? Not for a ball: a round thing about as tall as it is wide, every way."""
-        pr = self.layout.props[int(name[5:])]
-        size = np.asarray(pr["size"], float)
-        return not (pr.get("shape") == "round" and not pr.get("mesh") and size.max() <= BALL_ROUNDNESS * size.min())
+        """Does it matter which way up it lies? Not for a ball: its surface is about as far from its centre everywhere
+        (measured on the shape the twin built, features/geometry.py)."""
+        return self.shapes[name].has_up
+
+    def rot(self, name: str, d=None) -> np.ndarray:
+        """How the object is turned right now (3x3)."""
+        d = d if d is not None else self.data
+        R = np.zeros(9)
+        mujoco.mju_quat2Mat(R, d.qpos[self.obj_qadr[name] + 3:self.obj_qadr[name] + 7])
+        return R.reshape(3, 3)
+
+    def mass(self, name: str) -> float:
+        return float(self.model.body_mass[self.obj_body[name]])
 
     def things(self) -> list[str]:
         """Everything the gripper might pick up."""
@@ -274,7 +296,12 @@ class World:
     def palm(self, name: str) -> float:
         """How far the tool point can go down over this object's top before a part of the arm above the jaws
         (the palm, the wrist) sits on it: rays up from the object's top, the tool pointing straight down."""
-        key = (round(self.grasp_width(name), 4), round(self.radius(name), 4))
+        R = self.rot(name)
+        yaw = self.grasp_yaw(name) if self.arm.gripper["mode"] != "single" else self._jaw_free_yaw(name)
+        top = self.shapes[name].top_outline(R)
+        c, s_ = np.cos(-yaw), np.sin(-yaw)
+        top = top @ np.array([[c, -s_], [s_, c]]).T              # in the frame where the jaws close along x
+        key = (name, round(self.grasp_width(name), 4), tuple(np.round(top, 3).ravel()))
         if key in self._palms:
             return self._palms[key]
         m, s = self.model, self.ik.scratch
@@ -288,11 +315,10 @@ class World:
         centre = tool
         if self.arm.gripper["mode"] == "single":           # the object stands beside the fixed jaw (grasp_offset); here the jaws close along x
             centre = tool - np.array([float(self.arm.gripper.get("fixed_side", 1)) * (self.grasp_width(name) / 2 + FIXED_JAW_GAP), 0, 0])
-        r = 0.6 * min(self.radius(name), 0.5 * self.grasp_width(name) + 0.01)
         robot = self._robot_bodies()
         geomid = np.zeros(1, np.int32)
         best = 1.0
-        for dx, dy in ((0, 0), (r, 0), (-r, 0), (0, r), (0, -r)):
+        for dx, dy in top:                                 # rays up from under its top (its real outline)
             start = centre + np.array([dx, dy, 0.0])
             for _ in range(8):                           # skip what is not the robot (objects above, the scene)
                 dist = mujoco.mj_ray(m, s, start, np.array([0.0, 0.0, 1.0]), None, 1, -1, geomid)
@@ -308,6 +334,11 @@ class World:
         self._palms[key] = best
         return best
 
+    def _jaw_free_yaw(self, name: str) -> float:
+        """The direction across its narrowest width, before choosing which way round a single jaw goes."""
+        across = self.shapes[name].grip(self.rot(name))[1]
+        return float(across) if across is not None else 0.0
+
     def stack_hang(self, name: str, held: float = 0.0) -> float:
         """How far below the tool the bottom of `name` hangs, held `held` above its bottom (default: as low as the jaws go).
         A thing taller than the palm sticks up into the hand and is held higher than asked."""
@@ -319,19 +350,27 @@ class World:
         x, y = self._abs((rx, ry), self.hand.base)
         return (float(x), float(y))
 
-    def grasp_width(self, name: str) -> float:
-        """How far the jaws must open: the object's narrower horizontal side."""
-        hx, hy, _ = self.layout.props[int(name[5:])]["size"]
-        shape = self.layout.props[int(name[5:])].get("shape")
-        return 2 * ((hx + hy) / 2 if shape == "cylinder" else min(hx, hy))
+    def grasp_width(self, name: str, d=None) -> float:
+        """How far the jaws must open: the narrowest width across the part of it the jaws close on, as it lies now
+        (features/geometry.py: any outline, a scanned mesh too)."""
+        return self.shapes[name].grip(self.rot(name, d))[0]
 
-    def grasp_yaw(self, name: str) -> float:
-        """Direction to close the jaws along: across the narrower side (object axes, plus its own rotation)."""
-        pr = self.layout.props[int(name[5:])]
-        hx, hy, _ = pr["size"]
-        yaw = np.radians(float(pr.get("yaw", 0.0)))
-        if not (pr.get("shape") in ("cylinder", "round") or hx <= hy):
-            yaw = yaw + np.pi / 2
+    def grasp_yaw(self, name: str, d=None) -> float:
+        """Direction to close the jaws along: across its narrowest width. A round outline has none of its own: then along
+        the object's own heading. Of the two ways round, the one nearer its heading or square to it (how a box was always
+        gripped), so the wrist turns as little as it must."""
+        R = self.rot(name, d)
+        heading = float(np.arctan2(R[1, 0], R[0, 0]))
+        placed = np.radians(float(self.layout.props[int(name[5:])].get("yaw", 0.0)))
+        if abs(np.angle(np.exp(1j * (heading - placed)))) < np.radians(1.0):
+            heading = float(placed)                     # not turned since it was put there: settling is not turning
+        across = self.shapes[name].grip(R)[1]
+        if across is None:
+            yaw = heading
+        else:
+            refs = (heading, heading + np.pi / 2)
+            yaw = min((across + k * np.pi for k in (-1, 0, 1, 2)),
+                      key=lambda c: min(abs(np.angle(np.exp(1j * (c - r)))) for r in refs))
         if self.arm.gripper["mode"] != "single":
             return float(yaw)
         return self._jaw_side(name, float(yaw))

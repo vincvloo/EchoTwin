@@ -23,8 +23,9 @@ def measure(world, name: str) -> dict:
     """Width of the grip (the narrow side), height, length (the long horizontal side) in metres, mass in kg."""
     pr = world.layout.props[int(name[5:])]
     hx, hy, hz = pr["size"]
+    mass = world.mass(name) if hasattr(world, "mass") else prop_mass(pr)      # the twin's (a mesh: from its volume)
     return {"width": float(world.grasp_width(name)), "height": float(2 * hz), "length": float(2 * max(hx, hy)),
-            "mass": prop_mass(pr)}
+            "mass": float(mass)}
 
 
 def from_task(task: dict) -> dict:
