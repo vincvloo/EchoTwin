@@ -491,6 +491,20 @@ class World:
             cache[key] = [(f[2], f[3], f[0]) for f in sorted(fits, reverse=True)]
         return cache[key]
 
+    def can_hold(self, at, yaw: float, pose=None) -> bool:
+        """Can the tool really be at `at` (x, y, z) with its jaws along `yaw`, from a base at `pose` (default where it
+        stands): the arm gets there (within 5 mm), lined up (within 30 degrees), touching neither itself nor the table?
+        The reach map only knows distance and height; this asks the arm, wrist and all."""
+        pose = self.hand.base if pose is None else np.asarray(pose, float)
+        at = np.asarray(at, float)
+        self.ik.set_base(pose)
+        rel = self._rel(at, pose)
+        q, miss, _ = self.ik.solve(at, yaw, self.ik.q_down, iters=150, tilt=self.workspace.tilt_for(rel, float(at[2])))
+        lined_up = float(self.ik.pose(q)[1] @ self.ik.c_axis @ np.array([np.cos(yaw), np.sin(yaw), 0.0]))
+        ok = miss < 0.005 and lined_up > np.cos(np.radians(30)) and not self._collides(q)
+        self.ik.set_base(self.hand.base)
+        return bool(ok)
+
     def _collides(self, q, deep: float = 0.003) -> bool:
         """Would the arm at joint values q, jaws open, touch itself, its base or the scenery (the table, furniture; not the
         things on the table, which it comes to grip, and not its jaws on the table, where they rest to grip a low thing)?
