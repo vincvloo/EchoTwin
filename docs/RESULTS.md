@@ -546,3 +546,21 @@ and things sliding off when stacked (5 of 30); glasses are still its weakest kin
 
 Tried and left out: turning in place slowly while holding something when the lean changes (the varied set 72 -> 73 and
 72 -> 72, the classic table 97 -> 95).
+
+## Missed grips: a single jaw carries slower (2026-10)
+
+The SO-ARM100's "lands" failures on varied objects were mostly things it did hold and then lost: cylinders, bottles and
+domes held for a fraction of a second after the lift, then gone, plus stacked things sliding off. Slowing only the first
+3 cm of the lift changed nothing; slowing the whole move did. Its single jaw holds less firmly than two pads, so this is a
+property of the arm: a new descriptor field `tool_speed` (m/s, resized with the arm), set to 0.1 for the SO-ARM100. Arms
+without it move as before (the simulation's 0.25 limit).
+
+| SO-ARM100 | without | with tool_speed 0.1 |
+|---|---|---|
+| varied objects, seed 21 | 72 / 90 | 79 / 90 |
+| varied objects, seed 33 | 72 / 90 | 70 / 90 |
+| varied objects, seed 45 | 65 / 90 | 80 / 90 |
+| classic table, seed 21 | 97 / 144 | 98 / 144 |
+
+At seed 45 stacked things sliding off fell from 11 of 30 to 1. A move takes about twice as long. The built-in arm is
+unchanged (no tool_speed).

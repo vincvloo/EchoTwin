@@ -105,6 +105,7 @@ class ArmSpec:
     scale: float = 1.0              # the arm k times its described size (see sized and resize)
     pad_contact: dict | None = None  # how the pads touch: {"friction": [slide, spin, roll], "condim": 4, ...} (see pad_tune)
     tilts: tuple = (0.0,)           # radians the gripper may lean outward from straight down, smallest first (tilts_deg)
+    tool_speed: float | None = None  # m/s: the fastest it moves its tool (what it holds swings and slips); None: VMAX
 
     @property
     def mjcf_path(self) -> Path | None:
@@ -123,7 +124,8 @@ class ArmSpec:
         if "fixed_gap" in g:                       # a single jaw's gap beside the thing is a length too
             g["fixed_gap"] = float(g["fixed_gap"]) * k
         return replace(self, scale=float(scale), gripper=g, tool={**self.tool, "pos": [v * k for v in self.tool["pos"]]},
-                       max_opening=(self.max_opening or 0.08) * k)
+                       max_opening=(self.max_opening or 0.08) * k,
+                       tool_speed=None if self.tool_speed is None else self.tool_speed * k)
 
     def missing_files(self) -> list[Path]:
         if self.mjcf == "builtin":
@@ -186,7 +188,8 @@ def parse(d: dict, source: Path | None = None) -> ArmSpec:
                    home=[float(v) for v in d["home"]], prefix=d.get("prefix", PREFIX),
                    mount_yaw_deg=float(d.get("mount_yaw_deg", 0.0)), max_opening=d.get("max_opening"),
                    download=d.get("download"), real=d.get("real"), source=source, pad_contact=d.get("pad_contact"),
-                   tilts=_tilts(d.get("tilts_deg", [0])))
+                   tilts=_tilts(d.get("tilts_deg", [0])),
+                   tool_speed=None if d.get("tool_speed") is None else float(d["tool_speed"]))
 
 
 def _tilts(deg) -> tuple:

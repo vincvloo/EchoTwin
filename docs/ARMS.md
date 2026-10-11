@@ -49,6 +49,7 @@ actuators, and these fields:
 | `home` | Five joint values to start from |
 | `max_opening` | How far the jaws open, in metres (objects wider than this are declined) |
 | `download` | Optional: repo, commit, path and files for `--download` |
+| `tool_speed` | Optional: the fastest it moves its tool, m/s, resized with the arm (default: the simulation's 0.25 for every arm). A gripper that holds less firmly carries more slowly: the SO-ARM100's single jaw is set to 0.1 |
 | `tilts_deg` | Optional: angles the gripper may lean outward from straight down, like `[0, 20, 40]`. The reach is measured for each, and the arm leans only as far as a spot needs (default `[0]`: always straight down) |
 | `pad_contact` | Optional: how the pads touch things, set on the pad geoms when the arm is loaded (your MJCF stays as it is): `friction` (slide, spin, roll), `condim` (4 adds spin friction), `solref`, `solimp`, `margin` |
 

@@ -708,6 +708,8 @@ class World:
             return hs.q
         self.ik.set_base(hs.base)
         v = np.clip(a[:3], -VMAX, VMAX)
+        if self.arm.tool_speed is not None and np.linalg.norm(v) > self.arm.tool_speed:   # this arm moves slower
+            v = v * (self.arm.tool_speed / np.linalg.norm(v))
         if len(a) > 4:
             hs.yaw = float(a[4])
         hs.target = self._clamp(hs.target + v * CTRL_DT, hs)
