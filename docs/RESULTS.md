@@ -564,3 +564,14 @@ without it move as before (the simulation's 0.25 limit).
 
 At seed 45 stacked things sliding off fell from 11 of 30 to 1. A move takes about twice as long. The built-in arm is
 unchanged (no tool_speed).
+
+## Real misses: a side spot the arm can really reach (2026-10)
+
+Of the SO-ARM100's remaining missed grips, some closed the jaws in the air (the tool 7 to 13 cm up). The side approach had
+picked a spot by the reach map, which knows only distance and height: near the base, with the jaws turned for that thing,
+the wrist could not get there, the arm stopped high and the jaws closed on nothing. `World.can_hold(at, yaw)` asks the arm
+(the solver with the jaws' angle and lean, lined up, touching neither itself nor the table), and the side approach only
+takes a spot that passes; else it comes down from above as before.
+
+SO-ARM100, same layouts: varied objects 79 -> 82, 70 -> 69, 80 -> 80 of 90 (seeds 21, 33, 45); classic table 98 -> 98.
+The built-in arm never needs the side approach.

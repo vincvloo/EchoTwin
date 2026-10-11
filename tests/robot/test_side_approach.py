@@ -42,3 +42,13 @@ def test_a_low_thing_is_approached_from_above_as_before():
     w = _world((0.05, 0.05, 0.04), (0.0, 0.0))
     task = PS.make_task(w, {"prop": 0, "goal": ("dir", (-1, 0), 0.12)}, "left")
     assert len(PS.waypoints(w, task, dict(PS.DEFAULTS))) == 8
+
+
+@so100
+def test_the_side_spot_is_one_the_arm_can_really_hold_its_jaws_at():
+    w = _world((0.034, 0.034, 0.08), (0.055, -0.027), A.load("so_arm100"))
+    task = PS.make_task(w, {"prop": 0, "goal": ("dir", (-1, 0), 0.12)}, "left")
+    side_low = [a for k, a in PS.waypoints(w, task, dict(PS.DEFAULTS)) if k == "move"][1]
+    assert w.can_hold(side_low, w.grasp_yaw("prop_0"))
+    assert not w.can_hold([0.9, 0.0, 0.02], 0.0)                  # out of reach
+    assert not w.can_hold([0.0, -0.2, -0.10], 0.0)                # in the table

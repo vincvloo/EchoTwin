@@ -150,8 +150,8 @@ def _side_way(world: World, me: str, at, carry: float, top: float, low: float, d
     """Where the tool waits beside a spot to come in sideways at height `low`, or None when it can come
     straight down from above: its hover there (the carry height, or the arm's ceiling) leaves the jaws above `top`.
     Sideways is along the jaws' plane (across the line they close along), so the open jaws pass on either side; of the
-    two directions, a reachable one clear of the other things, where the arm leans as much as at the spot itself, then
-    nearer the hand."""
+    two directions, one the arm can really get to with its jaws lined up (World.can_hold), clear of the other things,
+    where the arm leans as much as at the spot itself, then nearer the hand."""
     if not hasattr(world, "jaw_drop"):
         return None
     at = np.asarray(at, float)[:2]
@@ -166,7 +166,8 @@ def _side_way(world: World, me: str, at, carry: float, top: float, low: float, d
     lean = _lean(world, at, low)
     others = [n for n in world.things() if n != me]
     clear = lambda p: all(np.hypot(*(world.obj_pos(n, d)[:2] - p)) > world.radius(n) + 0.03 for n in others)
-    ok = [p for p in ways if world.reachable(p, low) and clear(p)]         # not into another thing on the table
+    holds = (lambda p: world.can_hold([p[0], p[1], low], y)) if hasattr(world, "can_hold") else (lambda p: True)
+    ok = [p for p in ways if world.reachable(p, low) and clear(p) and holds(p)]   # clear of other things; the arm gets there
     ok.sort(key=lambda p: _lean(world, p, low) != lean)              # the same lean first: it does not swing in the slide
     return [float(ok[0][0]), float(ok[0][1])] if ok else None
 
